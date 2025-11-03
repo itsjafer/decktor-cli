@@ -96,6 +96,44 @@ def improve_card(
     return content
 
 
+def _extract_db_from_apkg(apkg_stream: io.BytesIO, temp_dir: str) -> str:
+    """Extracts the Anki database from the .apkg stream into a temporary directory.
+
+    Args:
+        apkg_stream (io.BytesIO): The .apkg file stream.
+        temp_dir (str): The temporary directory to extract files into.
+
+    Returns:
+        str: The path to the extracted Anki database file.
+    """
+    db_path = ""
+
+    with zipfile.ZipFile(apkg_stream, "r") as z:
+        db_filename = next(
+            (name for name in z.namelist() if name.startswith("collection.anki2")), None
+        )
+        if not db_filename:
+            raise FileNotFoundError("Could not find 'collection.anki2' in the .apkg stream.")
+
+        compressed_db_path = os.path.join(temp_dir, db_filename)
+
+        print(f"Extracting database: {compressed_db_path}")
+        z.extract(db_filename, temp_dir)
+
+        # Handle .anki21b compressed databases
+        if db_filename.endswith(".anki21b"):
+            # We need to decompress it
+            db_path_to_load = compressed_db_path.replace(".anki21b", ".anki21")
+            dctx = zstandard.ZstdDecompressor()
+            with open(compressed_db_path, "rb") as ifh, open(db_path_to_load, "wb") as ofh:
+                dctx.copy_stream(ifh, ofh)
+            db_path = db_path_to_load
+        else:
+            db_path = compressed_db_path
+
+    return db_path
+
+
 def read_apkg_cards(apkg_stream: io.BytesIO):
     """Loads an .apkg file and reads the front/back of its cards."""
 
@@ -103,63 +141,38 @@ def read_apkg_cards(apkg_stream: io.BytesIO):
     temp_dir = tempfile.mkdtemp()
     db_path = ""
 
-    try:
-        with zipfile.ZipFile(apkg_stream, "r") as z:
-            db_filename = next(
-                (name for name in z.namelist() if name.startswith("collection.anki2")), None
-            )
-            if not db_filename:
-                raise FileNotFoundError("Could not find 'collection.anki2[1]' in the .apkg stream.")
+    db_path = _extract_db_from_apkg(apkg_stream, temp_dir)
 
-            compressed_db_path = os.path.join(temp_dir, db_filename)
+    col = Collection(db_path)
 
-            print(f"Extracting database: {compressed_db_path}")
-            z.extract(db_filename, temp_dir)
+    # col.find_cards("") returns a list of all card IDs (cids)
+    card_ids = col.find_cards("")
+    print(f"\nFound {len(card_ids)} total cards.")
 
-            if db_filename.endswith(".anki21b"):
-                # We need to decompress it
-                db_path_to_load = compressed_db_path.replace(".anki21b", ".anki21")
-                dctx = zstandard.ZstdDecompressor()
-                with open(compressed_db_path, "rb") as ifh, open(db_path_to_load, "wb") as ofh:
-                    dctx.copy_stream(ifh, ofh)
-            db_path = os.path.join(temp_dir, db_path_to_load)
+    cards = []
 
-        col = Collection(db_path)
+    for cid in card_ids:
+        card = col.get_card(cid)
 
-        # col.find_cards("") returns a list of all card IDs (cids)
-        card_ids = col.find_cards("")
-        print(f"\nFound {len(card_ids)} total cards.")
+        # Get the note (the data) from the card
+        note = card.note()
 
-        for i, cid in enumerate(card_ids[:10]):
-            card = col.get_card(cid)
+        field_names = [f["name"] for f in note.note_type()["flds"]]
 
-            # Get the note (the data) from the card
-            note = card.note()
+        field_data = dict(zip(field_names, note.fields))
 
-            # Get the field names from the note's template (model)
-            # This creates a list like ['Front', 'Back', 'Add. Info']
-            field_names = [f["name"] for f in note.note_type()["flds"]]
+        front_text_html = field_data.get("Front", "")
+        front_text = BeautifulSoup(front_text_html, "html.parser").get_text().strip()
+        back_text_html = field_data.get("Back", "")
+        back_text = BeautifulSoup(back_text_html, "html.parser").get_text().strip()
 
-            # note.fields is the list of data, e.g. ['Define cov matrix', '...matrix...']
-            # We zip them together to create a clean dictionary
-            field_data = dict(zip(field_names, note.fields))
+        cards.append({"front": front_text, "back": back_text})
 
-            # Now you can access the data by name, safely
-            # We use .get() to avoid errors if a field is missing
-            front_text_html = field_data.get("Front", "")
-            front_text = BeautifulSoup(front_text_html, "html.parser").get_text().strip()
-            back_text_html = field_data.get("Back", "")
-            back_text = BeautifulSoup(back_text_html, "html.parser").get_text().strip()
+    col.close()
 
-            print(f"\n--- Card {i + 1} (cid: {cid}) ---")
-            print(f"[Field 'Front']: {front_text}")
-            print(f"[Field 'Back']:  {back_text}")
+    # Clean up the temporary directory
+    if os.path.exists(temp_dir):
+        print(f"Cleaning up temporary directory: {temp_dir}")
+        shutil.rmtree(temp_dir)
 
-        col.close()
-    except Exception as e:
-        print(f"Error reading .apkg file: {e}")
-    # finally:
-    #     # Clean up the temporary directory
-    #     if os.path.exists(temp_dir):
-    #         print(f"Cleaning up temporary directory: {temp_dir}")
-    #         shutil.rmtree(temp_dir)
+    return cards

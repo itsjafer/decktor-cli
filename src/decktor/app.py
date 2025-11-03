@@ -11,7 +11,6 @@ from decktor.utils import get_prompt_template
 DEFAULT_PROMPT_PATH = os.path.join(os.path.dirname(__file__), "prompts", "default.txt")
 
 
-@st.cache_data
 def load_prompt(path):
     try:
         return get_prompt_template(path)
@@ -27,6 +26,16 @@ def load_css(file_name="main.css"):
     print(f"Loading CSS from: {css_path}")
     with open(css_path) as f:
         st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+
+def show_results(card: str, improved_card: str):
+    st.divider()
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.json(card)
+    with col2:
+        st.json(improved_card)
 
 
 def run_entrypoint():
@@ -86,45 +95,24 @@ def run():
         else:
             print("Processing uploaded .apkg file...")
             anki_file_io = BytesIO(anki_file.read())
-            read_apkg_cards(apkg_stream=anki_file_io)
-            exit(0)
+            cards = read_apkg_cards(apkg_stream=anki_file_io)
+
             with st.spinner("Loading LLM model..."):
                 model, tokenizer = get_llm_model(llm_model)
-            with st.spinner(f"Processing **{anki_file.name}** with model: **{llm_model}**"):
-                current_prompt = st.session_state.prompt_template
+            with st.spinner(f"Processing cards with model: **{llm_model}**"):
+                for card in cards:
+                    current_prompt = st.session_state.prompt_template
 
-                # Store original content
-                st.session_state.original_content = anki_file.read().decode("utf-8")
+                    st.session_state.original_content = card
 
-                improved_card = improve_card(
-                    st.session_state.original_content, model, tokenizer, current_prompt
-                )
-                st.session_state.improved_content = improved_card
+                    processed_card = improve_card(
+                        str(st.session_state.original_content), model, tokenizer, current_prompt
+                    )
+                    st.session_state.improved_content = processed_card
+
+                    show_results(str(card), processed_card)
+
             st.success("Processing complete!")
-
-    st.divider()
-    st.header("Results")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("#### Original Cards")
-        st.text_area(
-            "Original",
-            value=st.session_state.original_content,
-            height=400,
-            disabled=True,
-            label_visibility="collapsed",
-        )
-
-    with col2:
-        st.markdown("#### Improved Cards")
-        st.text_area(
-            "Improved",
-            value=st.session_state.improved_content,
-            height=400,
-            label_visibility="collapsed",
-        )
 
 
 if __name__ == "__main__":

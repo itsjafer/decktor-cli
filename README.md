@@ -1,6 +1,15 @@
-# DeckTor: Your Anki Doctor
-DeckTor uses **local** LLMs to help you find errors in your Anki deck and improve card quality. Models are fully local, so nothing is uploaded on the internet.
-  
+# DeckTor
+<div align="center">
+  <img src="media/logo.png" width="100%" />
+</div>
+
+
+DeckTor uses **local** LLMs to help you find errors in your Anki deck and improve card quality. Models are fully local, so nothing is uploaded to the internet.
+
+<div align="center">
+  <img src="media/interface.png" width="100%" />
+</div>
+
 ## Install
 1. Clone the repository and create the `conda` environment
 ```bash
@@ -51,6 +60,7 @@ This combination provides a good balance of VRAM efficiency and numerical stabil
 
 
 ## Roadmap
+- [ ] Add export options (.apkg, .json, .txt)
 - [ ] Add support for more models (e.g. Gemma3, Qwen3-14B)
 - [ ] Add support for multiple types of Anki cards
 

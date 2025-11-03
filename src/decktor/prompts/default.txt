@@ -15,16 +15,16 @@ If the card is already high-quality and meets these principles, **do not change 
 **JSON OUTPUT FORMAT:**
 You MUST respond *only* with a single JSON object. Do not add any other text, preamble, or explanation. The format is:
 {
-  "new_front": "The improved (or original) front text",
-  "new_back": "The improved (or original) back text",
+  "front": "The improved (or original) front text",
+  "back": "The improved (or original) back text",
   "changed": true,
   "reason": "A brief explanation of what was improved."
 }
 
 If no change was needed, use this exact format:
 {
-  "new_front": "The original front text",
-  "new_back": "The original back text",
+  "front": "The original front text",
+  "back": "The original back text",
   "changed": false,
   "reason": ""
 }
