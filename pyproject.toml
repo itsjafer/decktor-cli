@@ -12,13 +12,20 @@ description = "A simple tool to fix Anki cards using an LLM."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
-# Your project's dependencies go here
+
 dependencies = [
     "streamlit",
+    "scipy>=1.10.0",
+    "matplotlib>=3.6.0",
+    "opencv-python-headless>=4.5.5.64",
+    "accelerate",
+    "bitsandbytes>=0.46.1"
 ]
 
 [project.scripts]
-decktor = "decktor.app:run"
+decktor = "decktor.app:run_entrypoint"
+download_models = "decktor.download_models:main"
+
 
 [tool.setuptools]
 package-dir = { "" = "src" }

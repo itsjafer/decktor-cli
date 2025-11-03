@@ -6,4 +6,5 @@ dependencies:
     - python=3.10
     - pip
     - pip:
+        - git+https://github.com/huggingface/transformers
         - -e .[dev]
