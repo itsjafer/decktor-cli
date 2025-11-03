@@ -18,16 +18,17 @@ If you don't download the models now, they will be downloaded the first time you
 
 To selectively dowload models, check the one you want from `src/models.py` -> `SUPPORTED_MODELS` and type the key, e.g.:
 ```
-python src/download_models.sh --models "Qwen3 32B" 
+decktor download-models --models "Qwen3 32B" 
 ```
 or download all the supported ones:
 ```
-download_models.sh
+decktor download-models
 ```
+
 ## Run
 Simply run:
 ```
-decktor
+decktor run
 ```
 
 

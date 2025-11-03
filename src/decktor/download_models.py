@@ -10,8 +10,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from decktor.models import SUPPORTED_MODELS
 
 
-def main():
-    """Download and cache LLM models for Decktor."""
+def argument_parser():
+    """Create the argument parser for model downloading."""
     parser = argparse.ArgumentParser(description="Download and cache LLM models for Decktor.")
     parser.add_argument(
         "--models",
@@ -20,9 +20,13 @@ def main():
         help="List of model names to download.",
     )
     args = parser.parse_args()
+    return args
 
+
+def main(models):
+    """Download and cache LLM models for Decktor."""
     print(Panel("Starting model download... This might take a while. Patientia fortium est."))
-    for model_name in args.models:
+    for model_name in models:
         model_id = SUPPORTED_MODELS.get(model_name, {}).get("id", "")
         if not model_id:
             print(f"Model '{model_name}' is not supported. Skipping.")
@@ -36,4 +40,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    args = argument_parser()
+    main(args.models)

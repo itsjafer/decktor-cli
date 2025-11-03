@@ -23,9 +23,7 @@ dependencies = [
 ]
 
 [project.scripts]
-decktor = "decktor.app:run_entrypoint"
-download_models = "decktor.download_models:main"
-
+decktor = "decktor.cli:main_group"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
