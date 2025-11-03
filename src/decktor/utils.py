@@ -8,7 +8,6 @@ def get_prompt_template(prompt_path: str) -> str:
     return prompt_template
 
 
-def get_prompt(card: str, prompt_path: str) -> str:
+def make_prompt(card: str, prompt_template: str) -> str:
     """Get the prompt for improving an Anki card."""
-    prompt_template = get_prompt_template(prompt_path)
     return prompt_template.replace("{card}", card)

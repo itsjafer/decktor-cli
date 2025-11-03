@@ -1,0 +1,108 @@
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,100..900;1,100..900&display=swap');
+
+:root {
+    --accent-color: #4f46e5;
+    --accent-color-light: #eef2ff;
+    --accent-color-dark: #4338ca;
+
+    /* Neutrals */
+    --bg-color: #f9fafb;
+    --card-bg: #ffffff;
+    --text-primary: #111827;
+    --text-secondary: #374151;
+    --border-color: #ececec;
+    --border-color-focus: #4f46e5;
+
+    /* Fonts */
+    --font-sans: 'Hanken Grotesk', sans-serif;
+    --border-radius-sm: 6px;
+    --border-radius-md: 8px;
+    --border-radius-lg: 12px;
+}
+
+body,
+[data-testid="stAppViewContainer"] {
+    font-family: var(--font-sans);
+    color: var(--text-secondary);
+}
+
+
+/* All Headings (h1, h2, h3...) */
+[data-testid="stAppViewContainer"] h1,
+[data-testid="stAppViewContainer"] h2,
+[data-testid="stAppViewContainer"] h3,
+[data-testid="stAppViewContainer"] h4,
+[data-testid="stAppViewContainer"] h5,
+[data-testid="stAppViewContainer"] h6 {
+    font-family: var(--font-sans);
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+
+/* Sidebar */
+[data-testid="stSidebar"] {
+    background-color: var(--card-bg);
+    /* Clean white sidebar */
+    border-right: 1px solid var(--border-color);
+    padding: 1rem;
+}
+
+
+/* Main Buttons (st.button) */
+/* In case you ever use a "primary" button */
+[data-testid="stButton"] button:not([kind="secondary"]) {
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: 1.0rem;
+    padding: 0.6rem 1.2rem;
+    border-radius: var(--border-radius-md);
+
+    background-color: var(--accent-color);
+    color: var(--card-bg);
+    border: 1px solid var(--accent-color);
+}
+
+
+/* Containers (st.container(border=True)) */
+[data-testid="stLayoutWrapper"] {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-lg);
+    /* Softer corners */
+    padding: 1.5rem;
+}
+
+
+/* Text Areas (st.text_area) */
+[data-testid="stTextArea"] textarea {
+    font-family: var(--font-mono);
+    background-color: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-md);
+}
+
+[data-testid="stTextArea"] textarea:focus {
+    border-color: var(--border-color-focus);
+    background-color: var(--card-bg);
+    outline: none;
+}
+
+/* File Uploader (st.file_uploader) */
+[data-testid="stFileUploader"] [data-testid="stFileDropzone"] {
+    background-color: var(--bg-color);
+    border: 2px dashed var(--border-color);
+    border-radius: var(--border-radius-md);
+}
+
+[data-testid="stFileUploader"] [data-testid="stFileDropzone"]:hover {
+    background-color: var(--accent-color-light);
+    border-color: var(--accent-color);
+}
+
+[data-testid="stSelectbox"] div[data-baseweb="select"]>div {
+    background-color: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-md);
+    color: var(--text-secondary);
+}

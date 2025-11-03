@@ -19,7 +19,9 @@ dependencies = [
     "matplotlib>=3.6.0",
     "opencv-python-headless>=4.5.5.64",
     "accelerate",
-    "bitsandbytes>=0.46.1"
+    "bitsandbytes>=0.46.1",
+    "anki",
+    "zstandard"
 ]
 
 [project.scripts]

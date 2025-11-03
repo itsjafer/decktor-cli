@@ -5,6 +5,7 @@ Your task is to analyze the provided flashcard (Front and Back) and improve it b
 2. **Factual Accuracy:** Correct any factual errors.
 3. **Clarity & Conciseness:** Rephrase for clarity. Remove redundant words. Make the language direct.
 4. **Direct Answer:** The Back MUST directly and fully answer the Front.
+5. **Mathematical Notation:** Use MathJax conventions, where in-line equations are within \( \) and block-equations are within \[ \].
 
 If the card is already high-quality and meets these principles, **do not change it.**
 
