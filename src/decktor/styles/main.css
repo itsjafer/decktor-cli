@@ -10,7 +10,7 @@
     --card-bg: #ffffff;
     --text-primary: #111827;
     --text-secondary: #374151;
-    --border-color: #ececec;
+    --border-color: #fff;
     --border-color-focus: #4f46e5;
 
     /* Fonts */
@@ -42,7 +42,7 @@ body,
 
 /* Sidebar */
 [data-testid="stSidebar"] {
-    background-color: var(--card-bg);
+    background-color: var(--accent-color-light);
     /* Clean white sidebar */
     border-right: 1px solid var(--border-color);
     padding: 1rem;

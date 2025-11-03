@@ -30,7 +30,7 @@ def load_css(file_name="main.css"):
 
 
 def run_entrypoint():
-    subprocess.Popen(["streamlit", "run", "src/decktor/app.py"])
+    subprocess.Popen(["streamlit", "run", "src/decktor/app.py", "--server.address=127.0.0.1"])
 
 
 def run():
@@ -72,7 +72,7 @@ def run():
         )
 
     st.title("DeckTor")
-    st.write("Improve your Anki cards with an LLM.")
+    st.write("Your Anki Doctor. Improve your Anki cards with an LLM.")
 
     with st.container(border=True):
         anki_file = st.file_uploader("Upload your Anki .apkg file", type=["apkg"])
