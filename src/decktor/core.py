@@ -4,6 +4,7 @@ import io
 import os
 import shutil
 import tempfile
+import time
 import zipfile
 
 import torch
@@ -27,7 +28,7 @@ def get_llm_model(model_name: str, quantize: bool = True):
         An instance of the specified LLM model.
     """
     print(f"Loading model: {model_name} with quantization={quantize}")
-    
+
     # load the tokenizer and the model
     model_id = get_model_id(model_name)
 
@@ -58,18 +59,22 @@ def improve_card(
     tokenizer: AutoTokenizer,
     prompt_template: str,
     max_new_tokens: int = 8192,
-) -> str:
+) -> tuple[str, dict]:
     """Improve an Anki card using the specified LLM model and prompt template.
 
     Args:
         card (str): The original Anki card content.
-        llm_model (str): The LLM model to use for improvement.
+        model: The LLM model to use for improvement.
+        tokenizer: The tokenizer for the model.
         prompt_template (str): The prompt template to guide the LLM.
         max_new_tokens (int): Maximum number of new tokens to generate.
 
     Returns:
-        str: The improved Anki card content.
+        tuple[str, dict]: The improved Anki card content and performance metrics.
     """
+    # Track timing
+    start_time = time.time()
+
     # prepare the model input
     prompt = make_prompt(card, prompt_template)
     messages = [{"role": "user", "content": prompt}]
@@ -81,9 +86,17 @@ def improve_card(
     )
     model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
 
+    # Track tokenization time
+    tokenization_time = time.time() - start_time
+    input_token_count = model_inputs.input_ids.shape[1]
+
     # conduct text completion
+    generation_start = time.time()
     generated_ids = model.generate(**model_inputs, max_new_tokens=max_new_tokens)
+    generation_time = time.time() - generation_start
+
     output_ids = generated_ids[0][len(model_inputs.input_ids[0]) :].tolist()
+    output_token_count = len(output_ids)
 
     # parsing thinking content
     try:
@@ -95,7 +108,20 @@ def improve_card(
     thinking_content = tokenizer.decode(output_ids[:index], skip_special_tokens=True).strip("\n")
     content = tokenizer.decode(output_ids[index:], skip_special_tokens=True).strip("\n")
 
-    return content
+    # Calculate performance metrics
+    total_time = time.time() - start_time
+    tokens_per_second = output_token_count / generation_time if generation_time > 0 else 0
+
+    metrics = {
+        "total_time": total_time,
+        "tokenization_time": tokenization_time,
+        "generation_time": generation_time,
+        "input_tokens": input_token_count,
+        "output_tokens": output_token_count,
+        "tokens_per_second": tokens_per_second,
+    }
+
+    return content, metrics
 
 
 def _extract_db_from_apkg(apkg_stream: io.BytesIO, temp_dir: str) -> str:
