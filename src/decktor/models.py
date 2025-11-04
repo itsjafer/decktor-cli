@@ -5,7 +5,11 @@ SUPPORTED_MODELS = {
     },
     "Qwen3-30B-A3B-Thinking-2507": {
         "id": "Qwen/Qwen3-30B-A3B-Thinking-2507",
-        "description": "Qwen3 30B A3B Thinking 2507 variant. Fast but possibly less powerful.",
+        "description": "Qwen3 30B A3B Thinking 2507 variant. Faster but possibly less powerful.",
+    },
+    "Qwen3-4B-Thinking-2507": {
+        "id": "Qwen/Qwen3-4B-Thinking-2507",
+        "description": "Qwen3 4B Thinking 2507 variant. Very lightweight.",
     },
 }
 

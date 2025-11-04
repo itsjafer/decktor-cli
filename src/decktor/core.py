@@ -26,6 +26,8 @@ def get_llm_model(model_name: str, quantize: bool = True):
     Returns:
         An instance of the specified LLM model.
     """
+    print(f"Loading model: {model_name} with quantization={quantize}")
+    
     # load the tokenizer and the model
     model_id = get_model_id(model_name)
 

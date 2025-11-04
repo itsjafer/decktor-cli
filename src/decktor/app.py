@@ -38,6 +38,8 @@ def initialize_session_state():
         st.session_state.total_cards = 0
     if "cards_processed" not in st.session_state:
         st.session_state.cards_processed = 0
+    if "quantization" not in st.session_state:
+        st.session_state.quantization = True
 
 
 @st.cache_data
@@ -140,6 +142,9 @@ def show_results(card: str, improved_card: str):
     # Show comparison
     show_card_comparison(original_dict, improved_dict)
 
+def change_quantization_setting(new_value: bool):
+    """Change the quantization setting in session state."""
+    st.session_state.quantization = new_value
 
 def run_entrypoint():
     subprocess.Popen(["streamlit", "run", "src/decktor/app.py", "--server.address=127.0.0.1"])
@@ -170,6 +175,14 @@ def run():
             get_supported_model_names(),
             help="Choose the language model to process your cards.",
         )
+        quantization = st.checkbox(
+            "Use 4-bit Quantization (saves memory, necessary for large models)",
+            value=True,
+            help="Enable 4-bit quantization to reduce memory usage at the cost of some model quality.",
+            on_change=change_quantization_setting,
+            args=(not st.session_state.quantization,)
+        )
+
 
         st.divider()
 
@@ -275,7 +288,7 @@ def run():
                     status_text = st.empty()
 
                 with st.spinner(f"Loading model: **{llm_model}**..."):
-                    model, tokenizer = get_llm_model(llm_model)
+                    model, tokenizer = get_llm_model(llm_model, quantize=st.session_state.quantization)
                 
                 st.success(f"Model loaded successfully!")
                 
