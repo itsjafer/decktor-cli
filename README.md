@@ -1,10 +1,11 @@
+<div align="center">
+  <img src="media/banner.png" width="100%" />
+</div>
+
 # DeckTor
 <div align="center">
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
     <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+"></a>
-</div>
-<div align="center">
-  <img src="media/banner.png" width="100%" />
 </div>
 
 

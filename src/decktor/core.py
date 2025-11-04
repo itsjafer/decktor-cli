@@ -14,7 +14,7 @@ from bs4 import BeautifulSoup
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from decktor.models import get_model_id
-from decktor.utils import make_prompt
+from decktor.utils import make_prompt, make_batch_prompt
 
 
 def get_llm_model(model_name: str, quantize: bool = True):
@@ -37,18 +37,21 @@ def get_llm_model(model_name: str, quantize: bool = True):
         quantization_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,  # Use bfloat16 for computation
+            bnb_4bit_compute_dtype=torch.float16,  # Use bfloat16 for computation
         )
     else:
         quantization_config = None
 
     tokenizer = AutoTokenizer.from_pretrained(model_id)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id,
-        torch_dtype=torch.bfloat16,
-        quantization_config=quantization_config,
-        device_map="auto",
-    )
+
+    # Prepare model loading arguments
+    model_kwargs = {
+        "torch_dtype": torch.float16,
+        "quantization_config": quantization_config,
+        "device_map": "auto",
+    }
+
+    model = AutoModelForCausalLM.from_pretrained(model_id, **model_kwargs)
 
     return model, tokenizer
 
@@ -92,7 +95,11 @@ def improve_card(
 
     # conduct text completion
     generation_start = time.time()
-    generated_ids = model.generate(**model_inputs, max_new_tokens=max_new_tokens)
+    generated_ids = model.generate(
+        **model_inputs,
+        max_new_tokens=max_new_tokens,
+        use_cache=True,  # Enable KV cache for faster generation
+    )
     generation_time = time.time() - generation_start
 
     output_ids = generated_ids[0][len(model_inputs.input_ids[0]) :].tolist()
