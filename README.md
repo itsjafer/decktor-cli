@@ -4,7 +4,7 @@
     <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+"></a>
 </div>
 <div align="center">
-  <img src="media/logo.png" width="100%" />
+  <img src="media/banner.png" width="100%" />
 </div>
 
 
