@@ -11,7 +11,7 @@
 DeckTor uses **local** LLMs to help you find errors in your Anki deck and improve card quality. Models are fully local, so nothing is uploaded to the internet.
 
 <div align="center">
-  <img src="media/interface.png" width="100%" />
+  <img src="media/interface.png?" width="100%" />
 </div>
 
 ## Features
