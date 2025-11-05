@@ -74,6 +74,12 @@ This will launch the Streamlit web server. Open the "Local URL" (e.g., http://lo
 
 3. Use the web interface to upload your `.apkg` file, select your desired model, and start processing your cards.
 
+4. Once the cards are processed, go to the **Review** tab to accept or reject the changes.
+![Review tab](media/review.png)
+
+4. Finally, export your Anki deck:
+![Export your deck](media/export_deck.png)
+
 ### What models should I use?
 For reference, pleace check the benchmark below on a GPU NVIDIA RTX3090 (24GB VRAM):
 

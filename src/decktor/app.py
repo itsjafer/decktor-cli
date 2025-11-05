@@ -275,7 +275,7 @@ def run():
         unsafe_allow_html=True,
     )
 
-    st.markdown("### Your Anki Doctor. Improve your flashcards with local AI")
+    st.markdown("### Improve your flashcards with local AI")
 
     # Create tabs for better organization
     tab1, tab2, tab3 = st.tabs(["📤 Upload & Process", "📝 Review Cards", "📊 Summary & Export"])

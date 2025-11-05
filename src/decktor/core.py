@@ -106,8 +106,6 @@ def improve_card(
         max_new_tokens=max_new_tokens,
         use_cache=True,  # Enable KV cache for faster generation
     )
-    completed_content = tokenizer.decode(generated_ids[0], skip_special_tokens=True).strip("\n")
-    print(completed_content)
 
     generation_time = time.time() - generation_start
 
