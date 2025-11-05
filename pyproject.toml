@@ -21,7 +21,7 @@ dependencies = [
     "accelerate",
     "bitsandbytes>=0.46.1",
     "anki",
-    "zstandard"
+    "zstandard",
 ]
 
 [project.scripts]

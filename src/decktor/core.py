@@ -8,6 +8,7 @@ import tempfile
 import time
 import zipfile
 
+import streamlit as st
 import torch
 import zstandard
 from anki.collection import Collection
@@ -18,6 +19,7 @@ from decktor.models import get_model_id
 from decktor.utils import make_prompt
 
 
+@st.cache_resource(show_spinner="Loading LLM model...")
 def get_llm_model(model_name: str, quantize: bool = True):
     """Get the LLM model instance based on the model name.
 
@@ -63,6 +65,7 @@ def improve_card(
     tokenizer: AutoTokenizer,
     prompt_template: str,
     max_new_tokens: int = 8192,
+    thinking_mode: bool = False,
 ) -> tuple[str, dict]:
     """Improve an Anki card using the specified LLM model and prompt template.
 
@@ -135,13 +138,6 @@ def improve_card(
         "throughput_tokens_per_second": tokens_per_second,
     }
 
-    try:
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        elif torch.backends.mps.is_available():
-            torch.mps.empty_cache()
-    except Exception as e:
-        pass
     return content, metrics
 
 

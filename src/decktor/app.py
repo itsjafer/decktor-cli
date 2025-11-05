@@ -1,10 +1,11 @@
-import ast
 import json
+import logging
 import os
 import subprocess
 from io import BytesIO
 
 import streamlit as st
+import torch
 from PIL import Image
 
 from decktor.core import get_llm_model, improve_card, read_apkg_cards
@@ -15,6 +16,7 @@ from decktor.utils import (
 )
 
 DEFAULT_PROMPT_PATH = os.path.join(os.path.dirname(__file__), "prompts", "default.txt")
+logger = logging.getLogger(__name__)
 
 
 def load_prompt(path):
@@ -76,6 +78,20 @@ def load_css(file_name="main.css"):
         st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 
+def accept_card():
+    idx = st.session_state.current_card_index
+    st.session_state.processed_cards[idx]["status"] = "accepted"
+    if idx < len(st.session_state.processed_cards) - 1:
+        st.session_state.current_card_index = idx + 1
+
+
+def reject_card():
+    idx = st.session_state.current_card_index
+    st.session_state.processed_cards[idx]["status"] = "rejected"
+    if idx < len(st.session_state.processed_cards) - 1:
+        st.session_state.current_card_index = idx + 1
+
+
 def show_card_comparison(original_dict: dict, improved_dict: dict):
     """Show a side-by-side comparison of cards with visual indicators."""
 
@@ -116,20 +132,6 @@ def show_card_comparison(original_dict: dict, improved_dict: dict):
             else:
                 st.info(improved_back if improved_back else "_Empty_")
 
-    # # Show change indicator and reason
-    # if changed and reason:
-    #     col1, col2 = st.columns([1, 4])
-    #     with col1:
-    #         if front_changed or back_changed:
-    #             st.markdown("✅ **Changed**")
-    #         else:
-    #             st.markdown("**Unchanged**")
-    #     with col2:
-    #         st.caption(f"**Reason:** {reason}")
-    # elif not changed:
-    #     st.markdown("---")
-    #     st.markdown("**No changes needed** - Card already meets quality standards")
-
 
 def show_results(card: dict, improved_card: str):
     """Display original and improved card in a beautiful side-by-side comparison."""
@@ -154,18 +156,49 @@ def show_results(card: dict, improved_card: str):
         st.error(f"Error displaying card comparison: {e}")
 
 
-def change_quantization_setting(new_value: bool):
-    """Change the quantization setting in session state."""
-    st.session_state.quantization = new_value
-
-
-def change_thinking_mode_setting(new_value: bool):
-    """Change the thinking mode setting in session state."""
-    st.session_state.thinking_mode = new_value
-
-
 def run_entrypoint():
     subprocess.Popen(["streamlit", "run", "src/decktor/app.py", "--server.address=127.0.0.1"])
+
+
+def clear_gpu_cache():
+    """Clear GPU cache if available."""
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            logger.info("Cleared CUDA cache")
+        elif torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+            logger.info("Cleared MPS cache")
+    except Exception as e:
+        logger.warning(f"Failed to clear GPU cache: {e}")
+
+
+def restart_app():
+    """Restart the Streamlit app by clearing session state and GPU cache."""
+    try:
+        # Clear all session state keys properly
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+
+        # Reinitialize with defaults
+        initialize_session_state()
+
+        # Clear GPU memory
+        clear_gpu_cache()
+    except Exception as e:
+        logger.error(f"Error during app restart: {e}")
+        st.error(f"Failed to restart app: {e}")
+
+
+def close_app():
+    """Close the Streamlit app."""
+    try:
+        clear_gpu_cache()
+        st.success("App closed successfully. You can close this browser tab.")
+        st.stop()
+    except Exception as e:
+        logger.error(f"Error during app closure: {e}")
+        st.error(f"Error closing app: {e}")
 
 
 def run():
@@ -182,6 +215,10 @@ def run():
     initialize_session_state()
 
     with st.sidebar:
+        st.markdown("## Controls")
+        st.button("Restart App", type="secondary", use_container_width=True, on_click=restart_app)
+        st.button("Close App", type="secondary", use_container_width=True, on_click=close_app)
+
         st.markdown("## Configuration")
 
         # Step 1: Model Selection
@@ -194,15 +231,13 @@ def run():
             "Use 4-bit Quantization (saves memory, necessary for large models)",
             value=st.session_state.quantization,
             help="Enable 4-bit quantization to reduce memory usage at the cost of some model quality.",
-            on_change=change_quantization_setting,
-            args=(not st.session_state.quantization,),
+            key="quantization",
         )
         thinking_mode = st.toggle(
             "Use Thinking Mode (slower but more accurate)",
             value=st.session_state.thinking_mode,
             help="Enable Thinking Mode to improve response quality at the cost of speed.",
-            on_change=change_thinking_mode_setting,
-            args=(not st.session_state.thinking_mode,),
+            key="thinking_mode",
         )
 
         st.divider()
@@ -223,18 +258,6 @@ def run():
             key="prompt_template",
             help="This template guides the LLM in improving your cards.",
         )
-
-        # Show processing stats in sidebar if processing is complete
-        if st.session_state.processing_complete and st.session_state.processed_cards:
-            st.divider()
-            st.markdown("## 📊 Processing Summary")
-            total = len(st.session_state.processed_cards)
-            st.metric("Total Cards", total)
-            st.metric("Cards Processed", st.session_state.cards_processed)
-
-            if total > 0:
-                progress_pct = (st.session_state.cards_processed / total) * 100
-                st.progress(progress_pct / 100)
 
     # Main content area
     st.markdown(
@@ -311,12 +334,13 @@ def run():
                     progress_bar = st.progress(0)
                     status_text = st.empty()
 
-                with st.spinner(f"Loading model: **{llm_model}**..."):
                     model, tokenizer = get_llm_model(
                         llm_model, quantize=st.session_state.quantization
                     )
 
-                st.success("Model loaded successfully!")
+                st.success(
+                    "Model loaded successfully! Once the processing is complete, you can review the changes in the 'Review Cards' tab."
+                )
 
                 # Reset performance metrics
                 st.session_state.performance_metrics = []
@@ -329,7 +353,11 @@ def run():
                     current_prompt = st.session_state.prompt_template
 
                     processed_card, metrics = improve_card(
-                        str(card), model, tokenizer, current_prompt
+                        str(card),
+                        model,
+                        tokenizer,
+                        current_prompt,
+                        thinking_mode=st.session_state.thinking_mode,
                     )
 
                     st.session_state.improved_content = processed_card
@@ -351,6 +379,115 @@ def run():
                 st.balloons()
                 st.success(f"Successfully processed {len(cards)} cards!")
                 st.info("Switch to the **Review Cards** tab to review and accept/reject changes")
+
+    with tab2:
+        # Interactive Review Tab
+        if not st.session_state.processed_cards:
+            st.info(
+                "Cards will appear here as they are processed. Start processing in the Upload tab!"
+            )
+        else:
+            # Header with progress
+            total_cards = len(st.session_state.processed_cards)
+            accepted = sum(
+                1 for c in st.session_state.processed_cards if c.get("status") == "accepted"
+            )
+            rejected = sum(
+                1 for c in st.session_state.processed_cards if c.get("status") == "rejected"
+            )
+            pending = total_cards - accepted - rejected
+
+            st.markdown(f"### Review Cards ({accepted + rejected}/{total_cards} reviewed)")
+
+            # Compact progress bar
+            progress_pct = (accepted + rejected) / total_cards if total_cards > 0 else 0
+            st.progress(
+                progress_pct,
+                text=f"{accepted} accepted ✅  |  {rejected} rejected ❌ |  {pending} pending ⏳",
+            )
+
+            # Card navigation - simplified
+            col1, col2, col3 = st.columns([1, 2, 1])
+
+            with col1:
+                if st.button(
+                    "⬅️ Previous",
+                    disabled=st.session_state.current_card_index == 0,
+                    use_container_width=True,
+                ):
+                    st.session_state.current_card_index -= 1
+
+            with col2:
+                # Jump to card selector
+                card_options = [f"Card {i + 1}" for i in range(total_cards)]
+                selected = st.selectbox(
+                    "Jump to card:",
+                    options=range(total_cards),
+                    format_func=lambda x: f"Card {x + 1}",
+                    index=st.session_state.current_card_index,
+                    label_visibility="collapsed",
+                )
+                if selected != st.session_state.current_card_index:
+                    st.session_state.current_card_index = selected
+
+            with col3:
+                if st.button(
+                    "Next ➡️",
+                    disabled=st.session_state.current_card_index >= total_cards - 1,
+                    use_container_width=True,
+                ):
+                    st.session_state.current_card_index += 1
+
+            # Current card display
+            current_card = st.session_state.processed_cards[st.session_state.current_card_index]
+            current_status = current_card.get("status", "pending")
+
+            # Compact status indicator
+            status_emoji = {"accepted": "✅", "rejected": "❌", "pending": ""}
+            st.markdown(
+                f"### {status_emoji.get(current_status, '')} Card {st.session_state.current_card_index + 1}"
+            )
+
+            # Show card comparison
+            show_card_comparison(current_card["original"], current_card["improved"])
+
+            col1, col2 = st.columns([1, 1])
+
+            with col1:
+                button_accept = st.button(
+                    "**Accept**",
+                    use_container_width=True,
+                    key="accept_btn",
+                    icon="✅",
+                    on_click=accept_card,
+                )
+
+            with col2:
+                button_reject = st.button(
+                    "**Reject**",
+                    use_container_width=True,
+                    key="reject_btn",
+                    icon="❌",
+                    on_click=reject_card,
+                )
+
+            # Quick actions (collapsible)
+            with st.expander("Quick Actions"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button(
+                        "Accept All Remaining", use_container_width=True, key="accept_all"
+                    ):
+                        for card in st.session_state.processed_cards:
+                            if card.get("status") == "pending":
+                                card["status"] = "accepted"
+                with col2:
+                    if st.button(
+                        "Reject All Remaining", use_container_width=True, key="reject_all"
+                    ):
+                        for card in st.session_state.processed_cards:
+                            if card.get("status") == "pending":
+                                card["status"] = "rejected"
 
 
 if __name__ == "__main__":
