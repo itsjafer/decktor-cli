@@ -1,6 +1,7 @@
 """Core LLM interaction logic for Decktor."""
 
 import io
+import json
 import os
 import shutil
 import tempfile
@@ -14,7 +15,7 @@ from bs4 import BeautifulSoup
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from decktor.models import get_model_id
-from decktor.utils import make_prompt, make_batch_prompt
+from decktor.utils import make_prompt
 
 
 def get_llm_model(model_name: str, quantize: bool = True):
@@ -85,7 +86,7 @@ def improve_card(
         messages,
         tokenize=False,
         add_generation_prompt=True,
-        enable_thinking=True,
+        enable_thinking=False,
     )
     model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
 
@@ -100,6 +101,9 @@ def improve_card(
         max_new_tokens=max_new_tokens,
         use_cache=True,  # Enable KV cache for faster generation
     )
+    completed_content = tokenizer.decode(generated_ids[0], skip_special_tokens=True).strip("\n")
+    print(completed_content)
+
     generation_time = time.time() - generation_start
 
     output_ids = generated_ids[0][len(model_inputs.input_ids[0]) :].tolist()
@@ -123,11 +127,21 @@ def improve_card(
         "total_time": total_time,
         "tokenization_time": tokenization_time,
         "generation_time": generation_time,
-        "input_tokens": input_token_count,
-        "output_tokens": output_token_count,
-        "tokens_per_second": tokens_per_second,
+        "total_input_tokens_unpadded": input_token_count,
+        "total_output_tokens": output_token_count,
+        "avg_total_time_per_card": total_time,
+        "avg_gen_time_per_card": generation_time,
+        "throughput_cards_per_second": 1 / total_time,
+        "throughput_tokens_per_second": tokens_per_second,
     }
 
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        elif torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+    except Exception as e:
+        pass
     return content, metrics
 
 

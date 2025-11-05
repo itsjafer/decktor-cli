@@ -50,7 +50,7 @@ You can see all available models in `src/models.py` under the `SUPPORTED_MODELS`
 
 * **(Recommended) To download one specific model (e.g. Qwen3 32B):**
     ```bash
-    decktor download-models --models "Qwen3 32B"
+    decktor download-models --models "Qwen3-4B (Thinking only)"
     ```
 * **To download all supported models:**
     ```bash
@@ -73,6 +73,19 @@ decktor run
 This will launch the Streamlit web server. Open the "Local URL" (e.g., http://localhost:8501) in your browser.
 
 3. Use the web interface to upload your `.apkg` file, select your desired model, and start processing your cards.
+
+### What models should I use?
+| Model                             | Thinking toggle | Time per card |
+| --------------------------------- | --------------- | ------------- |
+| Qwen3-4B (Non-Thinking only)      | -               | 3s            |
+| Qwen3-4B (Thinking only)          | -               | 50s           |
+| Qwen3-32B (With/Without Thinking) | Non-active      | 7s            |
+| Qwen3-32B (With/Without Thinking) | Active          | 70s           |
+
+
+
+- If you have a GPU with 16GB+ VRAM, the recommended model is **Qwen3-32B (With/Without Thinking)**, **Thinking** activated, **Quantization** activated. This should take ~10s per Anki card.
+- If your GPU has less than 16GB VRAM, the recommended model is **Qwen3-4B (Non-Thinking)**, **Quantization** de-activated.
 
 ## Roadmap
 - [ ] Add export options (.apkg, .json, .txt)

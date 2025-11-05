@@ -10,7 +10,6 @@ from PIL import Image
 from decktor.core import get_llm_model, improve_card, read_apkg_cards
 from decktor.models import get_supported_model_names
 from decktor.utils import (
-    get_gpu_info,
     get_prompt_template,
     img_to_bytes,
 )
@@ -44,26 +43,27 @@ def initialize_session_state():
     if "cards_processed" not in st.session_state:
         st.session_state.cards_processed = 0
     if "quantization" not in st.session_state:
-        st.session_state.quantization = True
+        st.session_state.quantization = False
     if "performance_metrics" not in st.session_state:
         st.session_state.performance_metrics = []
-    if "gpu_info" not in st.session_state:
-        st.session_state.gpu_info = None
+    if "thinking_mode" not in st.session_state:
+        st.session_state.thinking_mode = False
 
 
 def show_performance(metrics: dict):
     with st.expander("Performance Metrics", expanded=False):
-        col1, col2, col3, col4, col5 = st.columns(5)
+        col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Tokens/sec", f"{metrics['tokens_per_second']:.1f}")
+            st.metric("Tokens/sec", f"{metrics['throughput_tokens_per_second']:.1f}")
         with col2:
-            st.metric("Total Time", f"{metrics['total_time']:.2f}s")
+            st.metric("Time per card", f"{metrics['total_time']:.2f}s")
         with col3:
             st.metric("Generation Time", f"{metrics['generation_time']:.2f}s")
+        col4, col5 = st.columns(2)
         with col4:
-            st.metric("Input Tokens", metrics["input_tokens"])
+            st.metric("Input Tokens", metrics["total_input_tokens_unpadded"])
         with col5:
-            st.metric("Output Tokens", metrics["output_tokens"])
+            st.metric("Output Tokens", metrics["total_output_tokens"])
 
 
 @st.cache_data
@@ -76,12 +76,7 @@ def load_css(file_name="main.css"):
         st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 
-def parse_card_json(card_str: str):
-    """Parse card string into dict."""
-    return json.loads(card_str)
-
-
-def show_card_comparison(original_dict: dict, improved_dict: dict, metrics: dict):
+def show_card_comparison(original_dict: dict, improved_dict: dict):
     """Show a side-by-side comparison of cards with visual indicators."""
 
     original_front = original_dict.get("front", "")
@@ -99,7 +94,7 @@ def show_card_comparison(original_dict: dict, improved_dict: dict, metrics: dict
 
     with col1:
         st.markdown("#### Original Card")
-        with st.container():
+        with st.container(border=True):
             st.markdown("**Front:**")
             st.info(original_front if original_front else "_Empty_")
             st.markdown("**Back:**")
@@ -107,7 +102,7 @@ def show_card_comparison(original_dict: dict, improved_dict: dict, metrics: dict
 
     with col2:
         st.markdown("#### Improved Card")
-        with st.container():
+        with st.container(border=True):
             st.markdown("**Front:**")
             if front_changed:
                 st.success(improved_front if improved_front else "_Empty_")
@@ -117,26 +112,26 @@ def show_card_comparison(original_dict: dict, improved_dict: dict, metrics: dict
             st.markdown("**Back:**")
             if back_changed:
                 st.success(improved_back if improved_back else "_Empty_")
+                st.markdown(f"**Reason for change:** {reason}")
             else:
                 st.info(improved_back if improved_back else "_Empty_")
 
-    # Show change indicator and reason
-    if changed and reason:
-        col1, col2 = st.columns([1, 4])
-        with col1:
-            if front_changed or back_changed:
-                st.markdown("✅ **Changed**")
-            else:
-                st.markdown("**Unchanged**")
-        with col2:
-            st.caption(f"**Reason:** {reason}")
-    elif not changed:
-        st.markdown("---")
-        st.markdown("**No changes needed** - Card already meets quality standards")
-    show_performance(metrics)
+    # # Show change indicator and reason
+    # if changed and reason:
+    #     col1, col2 = st.columns([1, 4])
+    #     with col1:
+    #         if front_changed or back_changed:
+    #             st.markdown("✅ **Changed**")
+    #         else:
+    #             st.markdown("**Unchanged**")
+    #     with col2:
+    #         st.caption(f"**Reason:** {reason}")
+    # elif not changed:
+    #     st.markdown("---")
+    #     st.markdown("**No changes needed** - Card already meets quality standards")
 
 
-def show_results(card: dict, improved_card: str, metrics: dict):
+def show_results(card: dict, improved_card: str):
     """Display original and improved card in a beautiful side-by-side comparison."""
     st.divider()
 
@@ -148,14 +143,13 @@ def show_results(card: dict, improved_card: str, metrics: dict):
         "original": original_dict,
         "improved": improved_dict,
         "status": "pending",
-        "metrics": metrics,
     }
     st.session_state.processed_cards.append(card_data)
     st.session_state.cards_processed += 1
 
     # Show comparison
     try:
-        show_card_comparison(original_dict, improved_dict, metrics)
+        show_card_comparison(original_dict, improved_dict)
     except Exception as e:
         st.error(f"Error displaying card comparison: {e}")
 
@@ -163,6 +157,11 @@ def show_results(card: dict, improved_card: str, metrics: dict):
 def change_quantization_setting(new_value: bool):
     """Change the quantization setting in session state."""
     st.session_state.quantization = new_value
+
+
+def change_thinking_mode_setting(new_value: bool):
+    """Change the thinking mode setting in session state."""
+    st.session_state.thinking_mode = new_value
 
 
 def run_entrypoint():
@@ -191,12 +190,19 @@ def run():
             get_supported_model_names(),
             help="Choose the language model to process your cards.",
         )
-        quantization = st.checkbox(
+        quantization = st.toggle(
             "Use 4-bit Quantization (saves memory, necessary for large models)",
-            value=True,
+            value=st.session_state.quantization,
             help="Enable 4-bit quantization to reduce memory usage at the cost of some model quality.",
             on_change=change_quantization_setting,
             args=(not st.session_state.quantization,),
+        )
+        thinking_mode = st.toggle(
+            "Use Thinking Mode (slower but more accurate)",
+            value=st.session_state.thinking_mode,
+            help="Enable Thinking Mode to improve response quality at the cost of speed.",
+            on_change=change_thinking_mode_setting,
+            args=(not st.session_state.thinking_mode,),
         )
 
         st.divider()
@@ -312,55 +318,33 @@ def run():
 
                 st.success("Model loaded successfully!")
 
-                # Get GPU info after model loading
-                st.session_state.gpu_info = get_gpu_info()
-
-                # Display GPU info
-                if st.session_state.gpu_info.get("available"):
-                    with st.expander("GPU Information", expanded=False):
-                        for device in st.session_state.gpu_info["devices"]:
-                            st.markdown(f"**{device['name']}**")
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("Total VRAM", f"{device['total_memory_gb']:.1f} GB")
-                            with col2:
-                                st.metric("Allocated", f"{device['allocated_memory_gb']:.1f} GB")
-                            with col3:
-                                st.metric("Free", f"{device['free_memory_gb']:.1f} GB")
-                else:
-                    st.warning("No GPU detected! Inference will be extremely slow.")
-
                 # Reset performance metrics
                 st.session_state.performance_metrics = []
 
-                # Process each card
-                for idx, card in enumerate(cards):
-                    status_text.text(f"Processing card {idx + 1} of {len(cards)}...")
-                    cards_metric.metric("Processed", f"{idx + 1}/{len(cards)}")
+                for i, card in enumerate(cards):
+                    status_text.text(f"Processing card {i + 1} of {len(cards)}...")
+                    cards_metric.metric("Processed", f"{i}/{len(cards)}")
 
-                    current_prompt = st.session_state.prompt_template
                     st.session_state.original_content = card
+                    current_prompt = st.session_state.prompt_template
 
                     processed_card, metrics = improve_card(
                         str(card), model, tokenizer, current_prompt
                     )
+
                     st.session_state.improved_content = processed_card
-                    st.session_state.performance_metrics.append(metrics)
-
-                    print("Original card --------------\n", card)
-                    print("Processed card --------------\n", processed_card)
-                    print(f"Performance metrics: {metrics}")
-
-                    # Update progress
-                    progress = (idx + 1) / len(cards)
-                    progress_bar.progress(progress)
 
                     # Show result with metrics
                     try:
-                        show_results(card, processed_card, metrics)
+                        show_results(card, processed_card)
                     except Exception as e:
-                        print(f"Error displaying results for card {idx + 1}: {e}")
+                        print(f"Error displaying results for card {i + 1}: {e}")
                         continue
+
+                    show_performance(metrics)
+
+                    progress = (i + 1) / len(cards)
+                    progress_bar.progress(progress)
 
                 st.session_state.processing_complete = True
                 status_text.text("Processing complete!")

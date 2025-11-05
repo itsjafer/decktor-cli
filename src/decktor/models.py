@@ -1,15 +1,15 @@
 SUPPORTED_MODELS = {
-    "Qwen3 32B": {
-        "id": "Qwen/Qwen3-32B",
-        "description": "Qwen3 32B base model. Slow but powerful.",
+    "Qwen3-4B (Non-Thinking only)": {
+        "id": "Qwen/Qwen3-4B-Instruct-2507",
+        "description": "Low memory required, fast inference.",
     },
-    "Qwen3-30B-A3B-Thinking-2507": {
-        "id": "Qwen/Qwen3-30B-A3B-Thinking-2507",
-        "description": "Qwen3 30B A3B Thinking 2507 variant. Faster but possibly less powerful.",
-    },
-    "Qwen3-4B-Thinking-2507": {
+    "Qwen3-4B (Thinking only)": {
         "id": "Qwen/Qwen3-4B-Thinking-2507",
-        "description": "Qwen3 4B Thinking 2507 variant. Very lightweight.",
+        "description": "Low memory required, slow inference.",
+    },
+    "Qwen3-32B (With/Without Thinking)": {
+        "id": "Qwen/Qwen3-32B",
+        "description": "High memory required, powerful, fast in non-thinking mode, slower in thinking mode.",
     },
 }
 
