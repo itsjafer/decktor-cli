@@ -8,7 +8,7 @@ import streamlit as st
 import torch
 from PIL import Image
 
-from decktor.core import get_llm_model, improve_card, read_apkg_cards
+from decktor.core import create_apkg, get_llm_model, improve_card, read_apkg_cards
 from decktor.models import get_supported_model_names
 from decktor.utils import (
     get_prompt_template,
@@ -216,8 +216,13 @@ def run():
 
     with st.sidebar:
         st.markdown("## Controls")
-        st.button("Restart App", type="secondary", use_container_width=True, on_click=restart_app)
-        st.button("Close App", type="secondary", use_container_width=True, on_click=close_app)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.button(
+                "Restart App", type="secondary", use_container_width=True, on_click=restart_app
+            )
+        with col2:
+            st.button("Close App", type="secondary", use_container_width=True, on_click=close_app)
 
         st.markdown("## Configuration")
 
@@ -273,7 +278,7 @@ def run():
     st.markdown("### Your Anki Doctor. Improve your flashcards with local AI")
 
     # Create tabs for better organization
-    tab1, tab2, tab3 = st.tabs(["📤 Upload & Process", "📝 Review Cards", "📊 Summary"])
+    tab1, tab2, tab3 = st.tabs(["📤 Upload & Process", "📝 Review Cards", "📊 Summary & Export"])
 
     with tab1:
         # Upload section
@@ -362,14 +367,27 @@ def run():
 
                     st.session_state.improved_content = processed_card
 
-                    # Show result with metrics
+                    original_dict = card
                     try:
-                        show_results(card, processed_card)
+                        improved_dict = json.loads(processed_card)
                     except Exception as e:
-                        print(f"Error displaying results for card {i + 1}: {e}")
-                        continue
+                        logging.error(f"Error parsing LLM output for card {i + 1}: {e}")
 
-                    show_performance(metrics)
+                        improved_dict = {
+                            "front": card.get("front", card.get("front", "")),
+                            "back": card.get("back", card.get("back", "")),
+                            "changed": False,
+                            "reason": f"Error: LLM output was not valid JSON. {e}",
+                        }
+
+                    # Add card to processed cards
+                    card_data = {
+                        "original": original_dict,
+                        "improved": improved_dict,
+                        "status": "pending",
+                    }
+                    st.session_state.processed_cards.append(card_data)
+                    st.session_state.cards_processed += 1
 
                     progress = (i + 1) / len(cards)
                     progress_bar.progress(progress)
@@ -381,13 +399,11 @@ def run():
                 st.info("Switch to the **Review Cards** tab to review and accept/reject changes")
 
     with tab2:
-        # Interactive Review Tab
         if not st.session_state.processed_cards:
             st.info(
                 "Cards will appear here as they are processed. Start processing in the Upload tab!"
             )
         else:
-            # Header with progress
             total_cards = len(st.session_state.processed_cards)
             accepted = sum(
                 1 for c in st.session_state.processed_cards if c.get("status") == "accepted"
@@ -406,7 +422,6 @@ def run():
                 text=f"{accepted} accepted ✅  |  {rejected} rejected ❌ |  {pending} pending ⏳",
             )
 
-            # Card navigation - simplified
             col1, col2, col3 = st.columns([1, 2, 1])
 
             with col1:
@@ -471,23 +486,68 @@ def run():
                     on_click=reject_card,
                 )
 
-            # Quick actions (collapsible)
-            with st.expander("Quick Actions"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button(
-                        "Accept All Remaining", use_container_width=True, key="accept_all"
-                    ):
-                        for card in st.session_state.processed_cards:
-                            if card.get("status") == "pending":
-                                card["status"] = "accepted"
-                with col2:
-                    if st.button(
-                        "Reject All Remaining", use_container_width=True, key="reject_all"
-                    ):
-                        for card in st.session_state.processed_cards:
-                            if card.get("status") == "pending":
-                                card["status"] = "rejected"
+    with tab3:
+        st.markdown("### Summary & Export")
+
+        if not st.session_state.processed_cards:
+            st.info("Process some cards in 'Tab 1' to see a summary and enable export.")
+        else:
+            # Summary statistics
+            total = len(st.session_state.processed_cards)
+            accepted = sum(
+                1 for c in st.session_state.processed_cards if c.get("status") == "accepted"
+            )
+            rejected = sum(
+                1 for c in st.session_state.processed_cards if c.get("status") == "rejected"
+            )
+            pending = total - accepted - rejected
+
+            st.markdown("#### Review Progress")
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Total Cards", total)
+            col2.metric("✅ Accepted", accepted)
+            col3.metric("❌ Rejected", rejected)
+            col4.metric("⏳ Pending", pending)
+
+            st.divider()
+
+            # Export section
+            st.markdown("#### Step 3: Export Your Improved Deck")
+            st.markdown(
+                "This will create a new `.apkg` file containing all cards. "
+                "Cards you **accepted** will have the improved content. "
+                "Cards you **rejected** or left **pending** will keep their original content."
+            )
+
+            # Get filename for the new deck
+            deck_name = st.text_input("**New Deck Name:**", "DeckTor Improved Deck")
+
+            # This prevents re-generating the file on every UI interaction
+            if st.button("Generate Export File", use_container_width=True):
+                with st.spinner("Creating .apkg file..."):
+                    try:
+                        safe_deck_name = deck_name.replace('"', "'")
+                        if not safe_deck_name:
+                            safe_deck_name = "DeckTor Export"
+
+                        file_data = create_apkg(st.session_state.processed_cards, safe_deck_name)
+                        st.session_state.export_file = file_data
+                        st.session_state.export_filename = f"{safe_deck_name}.apkg"
+                        st.success("Export file ready! Click 'Download' below.")
+                    except Exception as e:
+                        st.error(f"Failed to create .apkg file: {e}")
+                        logger.error(f"Failed to create .apkg: {e}")
+
+            # If the file exists in session_state, show the download button
+            if "export_file" in st.session_state:
+                st.download_button(
+                    label="**Download .apkg Deck**",
+                    data=st.session_state.export_file,
+                    file_name=st.session_state.export_filename,
+                    mime="application/zip",
+                    type="secondary",
+                    use_container_width=True,
+                )
 
 
 if __name__ == "__main__":

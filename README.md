@@ -75,6 +75,8 @@ This will launch the Streamlit web server. Open the "Local URL" (e.g., http://lo
 3. Use the web interface to upload your `.apkg` file, select your desired model, and start processing your cards.
 
 ### What models should I use?
+For reference, pleace check the benchmark below on a GPU NVIDIA RTX3090 (24GB VRAM):
+
 | Model                             | Thinking toggle | Time per card |
 | --------------------------------- | --------------- | ------------- |
 | Qwen3-4B (Non-Thinking only)      | -               | 3s            |
@@ -82,16 +84,18 @@ This will launch the Streamlit web server. Open the "Local URL" (e.g., http://lo
 | Qwen3-32B (With/Without Thinking) | Non-active      | 7s            |
 | Qwen3-32B (With/Without Thinking) | Active          | 70s           |
 
-
-
-- If you have a GPU with 16GB+ VRAM, the recommended model is **Qwen3-32B (With/Without Thinking)**, **Thinking** activated, **Quantization** activated. This should take ~10s per Anki card.
-- If your GPU has less than 16GB VRAM, the recommended model is **Qwen3-4B (Non-Thinking)**, **Quantization** de-activated.
+- If you have a consumer GPU with 16GB+ VRAM, the recommended model is **Qwen3-32B (With/Without Thinking)**, Thinking **non-active**, Quantization **active**. This should take <10s per Anki card.
+- If your GPU has between 8GB and 16GB VRAM, the recommended model is **Qwen3-4B (Non-Thinking)**, Quantization **non-active**.
+- If your GPU has less than 8GB VRAM, the recommended model is **Qwen3-4B (Non-Thinking)**, Quantization **active**.
+- If you are GPU-rich, lucky you! Choose the model you prefer with Thinking active and Quantization non-active.
 
 ## Roadmap
+- [ ] Add inference parameters to the sidebar for power users (`temperature`, `top_p`, `max_new_tokens`)
+- [ ] Add batch processing
 - [ ] Add export options (.apkg, .json, .txt)
 - [ ] Add support for more models (e.g. Gemma3, Qwen3-14B)
 - [ ] Add support for multiple types of Anki cards
-- [ ] Add API support.
+- [ ] Add API key support.
 
 
 ## LICENSE

@@ -12,6 +12,8 @@ import streamlit as st
 import torch
 import zstandard
 from anki.collection import Collection
+from anki.decks import DeckManager
+from anki.models import ModelManager
 from bs4 import BeautifulSoup
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
@@ -89,7 +91,7 @@ def improve_card(
         messages,
         tokenize=False,
         add_generation_prompt=True,
-        enable_thinking=False,
+        enable_thinking=thinking_mode,
     )
     model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
 
@@ -221,3 +223,58 @@ def read_apkg_cards(apkg_stream: io.BytesIO):
         shutil.rmtree(temp_dir)
 
     return cards
+
+
+def create_apkg(
+    processed_cards: list[dict], deck_name: str = "DeckTor Improved Deck"
+) -> io.BytesIO:
+    """Creates a new .apkg file from a list of processed cards.
+
+    Args:
+        processed_cards: The list of card dicts from st.session_state.
+        deck_name: The name for the new deck inside the .apkg.
+
+    Returns:
+        io.BytesIO: The in-memory .apkg (zip) file.
+    """
+    temp_dir = tempfile.mkdtemp()
+    db_path = os.path.join(temp_dir, "collection.anki2")
+    zip_path = os.path.join(temp_dir, "deck.apkg")
+
+    col = Collection(db_path)
+
+    deck_manager = DeckManager(col)
+    deck_id = deck_manager.id(deck_name, create=True)
+
+    model_manager = ModelManager(col)
+    basic_model = model_manager.by_name("Basic")
+
+    for card_data in processed_cards:
+        status = card_data.get("status", "pending")
+
+        content = card_data["original"]
+        if status == "accepted":
+            content = card_data["improved"]
+
+        front = content.get("front", "")
+        back = content.get("back", "")
+
+        note = col.new_note(basic_model)
+        note["Front"] = front
+        note["Back"] = back
+
+        col.add_note(note, deck_id)
+
+    col.save()
+    col.close()
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.write(db_path, arcname="collection.anki2")
+
+    with open(zip_path, "rb") as f:
+        zip_bytes_io = io.BytesIO(f.read())
+
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+
+    return zip_bytes_io
