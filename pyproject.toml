@@ -25,6 +25,8 @@ dependencies = [
     "click",
     "g4f",
     "curl_cffi",
+    "openai",
+    "anthropic",
 ]
 
 [project.scripts]

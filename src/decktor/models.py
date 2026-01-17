@@ -20,6 +20,28 @@ SUPPORTED_MODELS = {
         "description": "Uses g4f to access free LLM providers (no key required).",
         "type": "free",
     },
+    # OpenAI Models
+    "GPT-5 Mini": {
+        "id": "gpt-5-mini",
+        "description": "Fast, lightweight OpenAI model for real-time applications.",
+        "type": "openai",
+    },
+    "GPT-5": {
+        "id": "gpt-5",
+        "description": "OpenAI's main developer model.",
+        "type": "openai",
+    },
+    # Anthropic Models
+    "Claude Haiku 4.5": {
+        "id": "claude-haiku-4-5-latest",
+        "description": "Anthropic's fastest and most cost-efficient model.",
+        "type": "anthropic",
+    },
+    "Claude Sonnet 4.5": {
+        "id": "claude-sonnet-4-5-latest",
+        "description": "Balanced Anthropic model for performance and cost.",
+        "type": "anthropic",
+    },
 }
 
 

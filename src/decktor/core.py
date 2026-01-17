@@ -19,7 +19,7 @@ from bs4 import BeautifulSoup
 
 from decktor.models import SUPPORTED_MODELS
 from decktor.utils import make_prompt
-from decktor.llm import LLMProvider, GeminiProvider, FreeProvider
+from decktor.llm import LLMProvider, GeminiProvider, FreeProvider, OpenAIProvider, AnthropicProvider
 
 load_dotenv()
 
@@ -40,9 +40,15 @@ def get_llm_model(model_name: str) -> LLMProvider:
 
     # If explicitly free type or name implies free
     if model_type == "free" or model_name.lower() == "free":
-        return FreeProvider(model_info.get("id", "gpt-4o-mini")) 
+        return FreeProvider(model_info.get("id", "gpt-4o-mini"))
     
-    # Default to Gemini
+    # Route to appropriate provider based on type
+    if model_type == "openai":
+        return OpenAIProvider(model_name)
+    elif model_type == "anthropic":
+        return AnthropicProvider(model_name)
+    
+    # Default to Gemini for api type
     return GeminiProvider(model_name)
 
 

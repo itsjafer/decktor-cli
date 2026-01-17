@@ -16,7 +16,7 @@ Don't want to install anything? Run DeckTor directly in your browser:
 ## Features
 
 - **Scheduling Preserved:** Preserves scheduling information of the cards by modifying them in-place.
-- **Gemini API Powered:** Uses Google's Gemini models (Flash, Flash Lite) for fast and effective card processing.
+- **Multi-Provider Support:** Works with Google Gemini, OpenAI GPT, and Anthropic Claude models.
 - **Batch Processing:** Robust CLI for processing large decks with resume capability.
 - **GPT4Free Support:** Includes a "GPT4Free (Free)" option powered by `g4f`, allowing usage without an API key (only for testing, not recommended for large scale processing).
 - **Preview Mode:** Dry-run your changes before committing them to a new deck.
@@ -55,10 +55,17 @@ Don't want to install anything? Run DeckTor directly in your browser:
 
 4. **Configure Environment:**
 
-   Create a `.env` file in the root directory and add your Gemini API key:
+   Create a `.env` file in the root directory with your API key(s):
 
    ```bash
-   GEMINI_API_KEY=your_actual_api_key_here
+   # Google Gemini (default)
+   GOOGLE_API_KEY=your_gemini_key_here
+   
+   # OpenAI (for GPT-5, GPT-5 Mini)
+   OPENAI_API_KEY=your_openai_key_here
+   
+   # Anthropic (for Claude models)
+   ANTHROPIC_API_KEY=your_anthropic_key_here
    ```
 
 ## Usage
@@ -72,8 +79,10 @@ decktor process input.apkg output.apkg
 ### Options
 
 - `--model`: Choose the model to use. Default: `Gemini 2.5 Flash Lite`.
-    - Example: `--model "Gemini 2.5 Flash"`
-    - Example: `--model free` (Free mode)
+    - Gemini: `--model "Gemini 2.5 Flash"` or `--model "Gemini 2.5 Flash Lite"`
+    - OpenAI: `--model "GPT-5"` or `--model "GPT-5 Mini"`
+    - Claude: `--model "Claude Sonnet 4.5"` or `--model "Claude Haiku 4.5"`
+    - Free: `--model free` (no API key required)
 - `--batch-size`: Number of cards to process before saving progress. Default: `10`.
     - Example: `--batch-size 20`
 - `--preview`: Run in "dry run" mode. No changes are written to disk; changes are shown in the terminal.
