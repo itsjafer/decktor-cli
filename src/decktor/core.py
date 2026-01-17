@@ -180,7 +180,26 @@ def _update_note_fields(note, item: Dict[str, Any]) -> bool:
     return updated_any
 
 
-def _display_preview(console: Console, nid: int, note, item: Dict[str, Any], preview_mode: bool):
+def _normalize_item_keys(item: Dict[str, Any], valid_fields: List[str]) -> Dict[str, Any]:
+    """
+    Returns a new item dict where keys are case-insensitively mapped to valid_fields.
+    e.g. if item has 'front' and valid_fields has 'Front', new item has 'Front'.
+    """
+    valid_map = {f.lower(): f for f in valid_fields}
+    new_item = {}
+    
+    for k, v in item.items():
+        k_lower = k.lower()
+        if k_lower in valid_map:
+            actual_key = valid_map[k_lower]
+            new_item[actual_key] = v
+        else:
+            new_item[k] = v
+            
+    return new_item
+
+
+def _display_preview(console: Console, nid: int, original_fields: Dict[str, str], item: Dict[str, Any], preview_mode: bool, field_names: List[str]):
     """Displays a preview table of changes."""
     title_suffix = "(Dry Run)" if preview_mode else "(Limit Applied)"
     table = Table(title=f"Card {nid} {title_suffix}", show_lines=True)
@@ -188,13 +207,10 @@ def _display_preview(console: Console, nid: int, note, item: Dict[str, Any], pre
     table.add_column("Original", style="magenta", overflow="fold")
     table.add_column("Improved", style="green", overflow="fold")
 
-    field_names = [f['name'] for f in note.note_type()['flds']]
-    note_fields = dict(zip(field_names, note.fields))
-    
     all_keys = sorted(list(set(field_names) | set(k for k in item.keys() if k not in ["id", "changed", "reason"])))
     
     for key in all_keys:
-        original_val = note_fields.get(key, "(N/A)")
+        original_val = original_fields.get(key, "(N/A)")
         if isinstance(original_val, str) and "<" in original_val:
                 original_val_clean = _clean_field_html(original_val)
         else:
@@ -204,7 +220,7 @@ def _display_preview(console: Console, nid: int, note, item: Dict[str, Any], pre
         if new_val is None:
             new_val = ""
         
-        if key not in note_fields:
+        if key not in field_names:
             table.add_row(f"{key} (New)", "", f"[bold yellow]{new_val}[/bold yellow]")
         elif str(new_val) != "" and str(new_val) != str(original_val):
             table.add_row(key, str(original_val_clean), f"[bold green]{new_val}[/bold green]")
@@ -374,11 +390,19 @@ def process_apkg_with_resume(
                                 
                                 if nid_str in improved_map:
                                     item = improved_map[nid_str]
+                                    
+                                    # Normalize keys (case-insensitive mapping)
+                                    field_names = [f['name'] for f in note.note_type()['flds']]
+                                    item = _normalize_item_keys(item, field_names)
+                                    
+                                    # Capture original fields for preview BEFORE update
+                                    original_fields = dict(zip(field_names, note.fields))
+
                                     if item.get("changed", False):
                                         _update_note_fields(note, item)
                                     
                                     if (preview or limit is not None):
-                                         _display_preview(console, nid, note, item, preview)
+                                         _display_preview(console, nid, original_fields, item, preview, field_names)
 
                                 if not preview:
                                     note.add_tag(processed_tag)
