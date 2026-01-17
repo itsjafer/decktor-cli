@@ -4,9 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "decktor"
-version = "0.1.0"
+version = "0.2.0"
 authors = [
     { name = "Mauro Comi" },
+    { name = "Jafer Haider" },
 ]
 description = "A simple tool to fix Anki cards using an LLM."
 readme = "README.md"

@@ -1,36 +1,30 @@
 """Core LLM interaction logic for Decktor."""
 
-import io
 import json
 import os
 import shutil
-import tempfile
 import time
 import zipfile
-import zstandard
-from typing import Optional
+import re
+from typing import Optional, List, Dict, Any, Tuple
 
 import google.generativeai as genai
+import zstandard
 from anki.collection import Collection
-from anki.decks import DeckManager
-from anki.models import ModelManager
-from bs4 import BeautifulSoup
-
-import re
-from decktor.models import SUPPORTED_MODELS, get_model_id
-from decktor.utils import make_prompt
-from rich.progress import Progress, TextColumn, BarColumn, TimeRemainingColumn
+from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
+from rich.progress import Progress, TextColumn, BarColumn, TimeRemainingColumn
 from rich.table import Table
+from bs4 import BeautifulSoup
 
-import google.generativeai as genai
-from dotenv import load_dotenv
+from decktor.models import SUPPORTED_MODELS
+from decktor.utils import make_prompt
 
 load_dotenv()
 
 
-def get_llm_model(model_name: str):
+def get_llm_model(model_name: str) -> genai.GenerativeModel:
     """Get the LLM model instance based on the model name.
 
     Args:
@@ -128,150 +122,174 @@ def improve_card(
     return content, metrics
 
 
-def _extract_db_from_apkg(apkg_stream: io.BytesIO, temp_dir: str) -> str:
-    """Extracts the Anki database from the .apkg stream into a temporary directory.
-
-    Args:
-        apkg_stream (io.BytesIO): The .apkg file stream.
-        temp_dir (str): The temporary directory to extract files into.
-
-    Returns:
-        str: The path to the extracted Anki database file.
-    """
-    db_path = ""
-
-    with zipfile.ZipFile(apkg_stream, "r") as z:
-        names = z.namelist()
-        if "collection.anki21b" in names:
-            db_filename = "collection.anki21b"
-        elif "collection.anki2" in names:
-            db_filename = "collection.anki2"
-        else:
-            # Fallback for nested folders or other variations
-            db_filename = next(
-                (name for name in names if name.endswith("collection.anki21b")), 
-                next((name for name in names if name.endswith("collection.anki2")), None)
+def _setup_workspace(input_apkg: str, working_dir: str, console: Console) -> bool:
+    """Extracts the .apkg to the working directory."""
+    if not os.path.exists(working_dir):
+        os.makedirs(working_dir)
+        console.print(f"[bold green]Created working directory:[/bold green] {working_dir}")
+        console.print(f"Extracting [bold]{input_apkg}[/bold]...")
+        with zipfile.ZipFile(input_apkg, "r") as zf:
+            zf.extractall(working_dir)
+        return True
+    else:
+        # Validate existing workspace
+        if not any(os.path.exists(os.path.join(working_dir, f)) for f in ["collection.anki2", "collection.anki21", "collection.anki21b"]):
+            console.print(
+                f"[bold red]Error:[/bold red] Working directory {working_dir} exists but does not contain a valid collection file. "
+                "Please use a different working directory or clear it."
             )
+            return False
+        console.print(
+            f"[bold yellow]Resuming[/bold yellow] from existing working directory: {working_dir}"
+        )
+        return True
 
-        if not db_filename:
-            raise FileNotFoundError("Could not find 'collection.anki2' or 'collection.anki21b' in the .apkg stream.")
 
-        compressed_db_path = os.path.join(temp_dir, db_filename)
-
-        print(f"Extracting database: {compressed_db_path}")
-        z.extract(db_filename, temp_dir)
-
-        # Handle .anki21b compressed databases
-        if db_filename.endswith(".anki21b"):
-            # We need to decompress it
-            db_path_to_load = compressed_db_path.replace(".anki21b", ".anki21")
+def _get_collection_path(working_dir: str, console: Console) -> Optional[str]:
+    """Identifies and prepares the Anki database file."""
+    anki21b_path = os.path.join(working_dir, "collection.anki21b")
+    anki2_path = os.path.join(working_dir, "collection.anki2")
+    
+    if os.path.exists(anki21b_path):
+        console.print(f"[bold green]Found compressed database:[/bold green] {anki21b_path}")
+        # Decompress to collection.anki21
+        db_path = os.path.join(working_dir, "collection.anki21")
+        if not os.path.exists(db_path): # verify if we need to decompress
+            console.print("Decompressing database...")
             dctx = zstandard.ZstdDecompressor()
-            with open(compressed_db_path, "rb") as ifh, open(db_path_to_load, "wb") as ofh:
+            with open(anki21b_path, "rb") as ifh, open(db_path, "wb") as ofh:
                 dctx.copy_stream(ifh, ofh)
-            db_path = db_path_to_load
+        return db_path
+    elif os.path.exists(anki2_path):
+        return anki2_path
+    
+    console.print(f"[bold red]Error:[/bold red] No valid collection file found in {working_dir}.")
+    return None
+
+
+def _clean_field_html(html_content: str) -> str:
+    """Strips HTML from field content for LLM consumption."""
+    soup = BeautifulSoup(html_content, "html.parser")
+    return soup.get_text(separator="\n").strip()
+
+
+def _prepare_batch_for_llm(batch_nids: List[int], col: Collection, exclude_fields: List[str], console: Console) -> Tuple[List[Dict[str, Any]], Dict[int, Any]]:
+    """Prepares a batch of notes for the LLM."""
+    batch_payload = []
+    batch_notes = {}
+    
+    exclude_set = set(exclude_fields or [])
+
+    for nid in batch_nids:
+        try:
+            note = col.get_note(nid)
+            batch_notes[nid] = note
+            
+            field_names = [f['name'] for f in note.note_type()['flds']]
+            fields = dict(zip(field_names, note.fields))
+            
+            cleaned_fields = {}
+            for name, value in fields.items():
+                if name in exclude_set:
+                    continue
+                    
+                cleaned_val = _clean_field_html(value)
+                cleaned_fields[name] = cleaned_val
+
+            payload_item = {
+                "id": nid,
+                **cleaned_fields
+            }
+            batch_payload.append(payload_item)
+
+        except Exception as e:
+            console.print(f"[red]Failed to prepare note {nid} for batch: {e}[/red]")
+            
+    return batch_payload, batch_notes
+
+
+def _update_note_fields(note, item: Dict[str, Any]) -> bool:
+    """Updates note fields based on LLM response."""
+    updated_any = False
+    field_names = [f['name'] for f in note.note_type()['flds']]
+    
+    for field_name in field_names:
+        if field_name in item and item[field_name] is not None:
+            try:
+                note[field_name] = str(item[field_name])
+                updated_any = True
+            except KeyError:
+                pass
+    return updated_any
+
+
+def _display_preview(console: Console, nid: int, note, item: Dict[str, Any], preview_mode: bool):
+    """Displays a preview table of changes."""
+    title_suffix = "(Dry Run)" if preview_mode else "(Limit Applied)"
+    table = Table(title=f"Card {nid} {title_suffix}", show_lines=True)
+    table.add_column("Field", style="cyan", no_wrap=True)
+    table.add_column("Original", style="magenta", overflow="fold")
+    table.add_column("Improved", style="green", overflow="fold")
+
+    field_names = [f['name'] for f in note.note_type()['flds']]
+    note_fields = dict(zip(field_names, note.fields))
+    
+    all_keys = sorted(list(set(field_names) | set(k for k in item.keys() if k not in ["id", "changed", "reason"])))
+    
+    for key in all_keys:
+        original_val = note_fields.get(key, "(N/A)")
+        if isinstance(original_val, str) and "<" in original_val:
+                original_val_clean = _clean_field_html(original_val)
         else:
-            db_path = compressed_db_path
+                original_val_clean = original_val
 
-    return db_path
-
-
-def read_apkg_cards(apkg_stream: io.BytesIO):
-    """Loads an .apkg file and reads the front/back of its cards."""
-
-    # Create a temporary directory to extract the .apkg
-    temp_dir = tempfile.mkdtemp()
-    db_path = ""
-
-    db_path = _extract_db_from_apkg(apkg_stream, temp_dir)
-
-    col = Collection(db_path)
-
-    # col.find_cards("") returns a list of all card IDs (cids)
-    card_ids = col.find_cards("")
-    print(f"\nFound {len(card_ids)} total cards.")
-
-    cards = []
-
-    for cid in card_ids:
-        card = col.get_card(cid)
-
-        # Get the note (the data) from the card
-        note = card.note()
-
-        field_names = [f["name"] for f in note.note_type()["flds"]]
-
-        field_data = dict(zip(field_names, note.fields))
-
-        front_text_html = field_data.get("Front", "")
-        front_text = BeautifulSoup(front_text_html, "html.parser").get_text().strip()
-        back_text_html = field_data.get("Back", "")
-        back_text = BeautifulSoup(back_text_html, "html.parser").get_text().strip()
-
-        cards.append({"front": front_text, "back": back_text})
-
-    col.close()
-
-    # Clean up the temporary directory
-    if os.path.exists(temp_dir):
-        print(f"Cleaning up temporary directory: {temp_dir}")
-        shutil.rmtree(temp_dir)
-
-    return cards
+        new_val = item.get(key, "")
+        if new_val is None:
+            new_val = ""
+        
+        if key not in note_fields:
+            table.add_row(f"{key} (New)", "", f"[bold yellow]{new_val}[/bold yellow]")
+        elif str(new_val) != "" and str(new_val) != str(original_val):
+            table.add_row(key, str(original_val_clean), f"[bold green]{new_val}[/bold green]")
+        else:
+            table.add_row(key, str(original_val_clean), str(new_val))
+    
+    console.print(table)
+    if "reason" in item:
+        console.print(f"[italic]Reason: {item['reason']}[/italic]")
+    console.print("\n")
 
 
-def create_apkg(
-    processed_cards: list[dict], deck_name: str = "DeckTor Improved Deck"
-) -> io.BytesIO:
-    """Creates a new .apkg file from a list of processed cards.
+def _repackage_apkg(working_dir: str, output_apkg: str, console: Console, preview: bool):
+    """Repackages the working directory into an .apkg file."""
+    if preview:
+        console.print("[bold yellow]Preview mode complete. No output file created.[/bold yellow]")
+        return
 
-    Args:
-        processed_cards: The list of card dicts from st.session_state.
-        deck_name: The name for the new deck inside the .apkg.
+    # Handle database re-compression if needed
+    anki21_path = os.path.join(working_dir, "collection.anki21")
+    anki21b_path = os.path.join(working_dir, "collection.anki21b")
+    anki2_path = os.path.join(working_dir, "collection.anki2")
 
-    Returns:
-        io.BytesIO: The in-memory .apkg (zip) file.
-    """
-    temp_dir = tempfile.mkdtemp()
-    db_path = os.path.join(temp_dir, "collection.anki2")
-    zip_path = os.path.join(temp_dir, "deck.apkg")
+    if os.path.exists(anki21_path):
+        console.print("Re-compressing database to collection.anki21b...")
+        cctx = zstandard.ZstdCompressor()
+        with open(anki21_path, "rb") as ifh, open(anki21b_path, "wb") as ofh:
+            cctx.copy_stream(ifh, ofh)
+        os.remove(anki21_path)
+        console.print("Removed uncompressed collection.anki21")
 
-    col = Collection(db_path)
+    if os.path.exists(anki21b_path) and os.path.exists(anki2_path):
+        os.remove(anki2_path)
+        console.print("Removed legacy collection.anki2 to avoid conflicts.")
 
-    deck_manager = DeckManager(col)
-    deck_id = deck_manager.id(deck_name, create=True)
-
-    model_manager = ModelManager(col)
-    basic_model = model_manager.by_name("Basic")
-
-    for card_data in processed_cards:
-        status = card_data.get("status", "pending")
-
-        content = card_data["original"]
-        if status == "accepted":
-            content = card_data["improved"]
-
-        front = content.get("front", "")
-        back = content.get("back", "")
-
-        note = col.new_note(basic_model)
-        note["Front"] = front
-        note["Back"] = back
-
-        col.add_note(note, deck_id)
-
-    col.save()
-    col.close()
-
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.write(db_path, arcname="collection.anki2")
-
-    with open(zip_path, "rb") as f:
-        zip_bytes_io = io.BytesIO(f.read())
-
-    if os.path.exists(temp_dir):
-        shutil.rmtree(temp_dir)
-
-    return zip_bytes_io
+    console.print(f"Creating output package [bold]{output_apkg}[/bold]...")
+    with zipfile.ZipFile(output_apkg, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, _, files in os.walk(working_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                arcname = os.path.relpath(file_path, working_dir)
+                zf.write(file_path, arcname)
 
 
 def process_apkg_with_resume(
@@ -287,17 +305,6 @@ def process_apkg_with_resume(
 ):
     """
     Process an .apkg file using an LLM, with resume capability.
-
-    Args:
-        input_apkg: Path to the input .apkg file.
-        output_apkg: Path to the output .apkg file.
-        model_name: Name of the LLM model to use.
-        prompt_path: Path to the prompt template file.
-        working_dir: Directory to store intermediate files.
-        working_dir: Directory to store intermediate files.
-        batch_size: Number of cards to process before saving.
-        preview: If True, do not save changes to disk (Dry Run).
-        limit: Maximum number of cards to process.
     """
     console = Console()
 
@@ -313,46 +320,12 @@ def process_apkg_with_resume(
         )
 
     # 1. Setup Phase
-    if not os.path.exists(working_dir):
-        os.makedirs(working_dir)
-        console.print(f"[bold green]Created working directory:[/bold green] {working_dir}")
-        # Unzip everything
-        console.print(f"Extracting [bold]{input_apkg}[/bold]...")
-        with zipfile.ZipFile(input_apkg, "r") as zf:
-            zf.extractall(working_dir)
-    else:
-        # Check if it looks like a valid unzipped deck
-        if not any(os.path.exists(os.path.join(working_dir, f)) for f in ["collection.anki2", "collection.anki21", "collection.anki21b"]):
-            console.print(
-                f"[bold red]Error:[/bold red] Working directory {working_dir} exists but does not contain a valid collection file. "
-                "Please use a different working directory or clear it."
-            )
-            return
-
-        console.print(
-            f"[bold yellow]Resuming[/bold yellow] from existing working directory: {working_dir}"
-        )
+    if not _setup_workspace(input_apkg, working_dir, console):
+        return
 
     # 2. Database Setup
-    # 2. Database Setup
-    anki21b_path = os.path.join(working_dir, "collection.anki21b")
-    anki2_path = os.path.join(working_dir, "collection.anki2")
-    
-    db_path = anki2_path
-
-    if os.path.exists(anki21b_path):
-        console.print(f"[bold green]Found compressed database:[/bold green] {anki21b_path}")
-        # Decompress to collection.anki21
-        db_path = os.path.join(working_dir, "collection.anki21")
-        if not os.path.exists(db_path): # verify if we need to decompress
-            console.print("Decompressing database...")
-            dctx = zstandard.ZstdDecompressor()
-            with open(anki21b_path, "rb") as ifh, open(db_path, "wb") as ofh:
-                dctx.copy_stream(ifh, ofh)
-    elif os.path.exists(anki2_path):
-        db_path = anki2_path
-    else:
-        console.print(f"[bold red]Error:[/bold red] No valid collection file found in {working_dir}.")
+    db_path = _get_collection_path(working_dir, console)
+    if not db_path:
         return
 
     col = Collection(db_path)
@@ -366,16 +339,12 @@ def process_apkg_with_resume(
         prompt_template = f.read()
 
     # 4. Processing Loop
-    # 4. Processing Loop
     processed_tag = "decktor-processed"
     
     # Find all notes
-    # We want to iterate notes, not cards, to avoid processing the same content twice if multiple cards share a note.
     all_nids = col.find_notes("")
     total_notes = len(all_nids)
     
-    # Filter for unprocessed notes
-    # We can check if the note has the tag
     unprocessed_nids = []
     for nid in all_nids:
         note = col.get_note(nid)
@@ -387,13 +356,11 @@ def process_apkg_with_resume(
 
     processed_count = 0
     
-    # Apply limit
     if limit is not None:
         console.print(f"[yellow]Limiting processing to {limit} cards.[/yellow]")
         notes_to_process_count = min(notes_to_process_count, limit)
         unprocessed_nids = unprocessed_nids[:limit]
 
-    # Batching logic
     batches = [unprocessed_nids[i:i + batch_size] for i in range(0, len(unprocessed_nids), batch_size)]
 
     with Progress(
@@ -405,44 +372,11 @@ def process_apkg_with_resume(
         task = progress.add_task("[cyan]Processing notes...", total=notes_to_process_count)
 
         for batch_nids in batches:
-            batch_payload = []
-            batch_notes = {} # Map nid -> note object
-
-            for nid in batch_nids:
-                try:
-                    note = col.get_note(nid)
-                    batch_notes[nid] = note
-                    
-                    # Generic Field Extraction
-                    field_names = [f['name'] for f in note.note_type()['flds']]
-                    fields = dict(zip(field_names, note.fields))
-                    
-                    # Prepare cleaned fields for LLM
-                    cleaned_fields = {}
-                    exclude_set = set(exclude_fields or [])
-                    
-                    for name, value in fields.items():
-                        if name in exclude_set:
-                            continue
-                            
-                        # Clean HTML for the LLM input
-                        soup = BeautifulSoup(value, "html.parser")
-                        cleaned_val = soup.get_text(separator="\n").strip()
-                        cleaned_fields[name] = cleaned_val
-
-                    payload_item = {
-                        "id": nid,
-                        **cleaned_fields
-                    }
-                    batch_payload.append(payload_item)
-
-                except Exception as e:
-                    console.print(f"[red]Failed to prepare note {nid} for batch: {e}[/red]")
+            batch_payload, batch_notes = _prepare_batch_for_llm(batch_nids, col, exclude_fields, console)
             
             if not batch_payload:
                 continue
 
-            # Call LLM with batch
             max_retries = 3
             batch_success = False
 
@@ -450,44 +384,32 @@ def process_apkg_with_resume(
                 try:
                     cards_json = json.dumps(batch_payload, indent=2, ensure_ascii=False)
                     
-                    # Construct the full prompt manually to handle {cards} vs {card}
                     if "{cards}" in prompt_template:
                         full_prompt = prompt_template.replace("{cards}", cards_json)
                     else:
-                        # Fallback for old prompts
                         full_prompt = prompt_template.replace("{card}", cards_json)
 
-                    # Use improve_card to handle generation
-                    improved_text, _ = improve_card(
-                        full_prompt, 
-                        model, 
-                        "{card}" 
-                    )
+                    improved_text, _ = improve_card(full_prompt, model, "{card}")
                     
-                    # Parse Batch Output
                     json_match = re.search(r"\{.*\}", improved_text, re.DOTALL)
                     if json_match:
                         try:
                             response_json = json.loads(json_match.group(0))
-                            # Handle both {cards: [...]} and just [...] (unlikely if prompt is followed, but good for robustness)
                             if "cards" in response_json:
                                 improved_cards = response_json["cards"]
                             elif isinstance(response_json, list):
                                 improved_cards = response_json
+                            elif isinstance(response_json, dict) and "cards" not in response_json:
+                                # Edge case: single card object but wrapper expects list logic?
+                                # Assume response_json is the map if it smells like one? No, unsafe.
+                                # Let's assume the LLM followed instructions to return a list under "cards"
+                                # If it returns just a dict, maybe it treated batch as one item?
+                                improved_cards = [response_json] # Try treating as single list item
                             else:
-                                raise ValueError("Unexpected JSON format: missing 'cards' key or not a list")
+                                raise ValueError("Unexpected JSON format")
                                 
-                            # Create a map for easy lookup
-                            improved_map = {str(item["id"]): item for item in improved_cards}
+                            improved_map = {str(item.get("id")): item for item in improved_cards if "id" in item}
                             
-                            # Validate Batch
-                            validation_error = False
-                            # Validation: Currently loose. We verify that basic structure returned for matched IDs.
-                            # Strict validation of specific fields is hard without knowing schema.
-                            # We can check if "changed" is True, we expect SOME fields to follow.
-                            
-                            # If we got here, we assume format is okay enough to try updating.
-
                             for nid in batch_notes:
                                 note = batch_notes[nid]
                                 nid_str = str(nid)
@@ -495,99 +417,31 @@ def process_apkg_with_resume(
                                 if nid_str in improved_map:
                                     item = improved_map[nid_str]
                                     if item.get("changed", False):
-                                        # Update keys that match existing fields
-                                        field_names = [f['name'] for f in note.note_type()['flds']]
-                                        # Create a map of lower-case field names to real names for case-insensitive matching if needed,
-                                        # but usually exact match is best. Let's try exact match first.
-                                        
-                                        updated_any = False
-                                        for field_name in field_names:
-                                            if field_name in item and item[field_name] is not None:
-                                                 # Update field
-                                                 try:
-                                                     note[field_name] = str(item[field_name])
-                                                     updated_any = True
-                                                 except KeyError:
-                                                     # Should not happen given we iterate from note field_names
-                                                     pass
-                                        
-                                        if not updated_any:
-                                            # If no field names matched, maybe print a warning?
-                                            # console.print(f"[yellow]Warning: Card {nid} was marked changed but returned keys didn't match note fields: {list(item.keys())} vs {field_names}[/yellow]")
-                                            pass
+                                        _update_note_fields(note, item)
+                                    
+                                    if (preview or limit is not None):
+                                         _display_preview(console, nid, note, item, preview)
 
-                                # Always mark processed
                                 if not preview:
                                     note.add_tag(processed_tag)
                                     col.update_note(note)
                                 
                                 processed_count += 1
                                 progress.advance(task)
-                                                                # Preview logic
-                                if (preview or limit is not None) and nid_str in improved_map:
-                                    item = improved_map[nid_str]
-                                    title_suffix = "(Dry Run)" if preview else "(Limit Applied)"
-                                    
-                                    # Create table with overflow="fold" to show full content
-                                    table = Table(title=f"Card {nid} {title_suffix}", show_lines=True)
-                                    table.add_column("Field", style="cyan", no_wrap=True)
-                                    table.add_column("Original", style="magenta", overflow="fold")
-                                    table.add_column("Improved", style="green", overflow="fold")
-
-                                    field_names = [f['name'] for f in note.note_type()['flds']]
-                                    note_fields = dict(zip(field_names, note.fields))
-
-                                    # Show all fields that exist in the response or in the note
-                                    # We prioritize fields returned by LLM to show changes
-                                    
-                                    # Combine keys from note and item to show everything relevant
-                                    all_keys = sorted(list(set(field_names) | set(k for k in item.keys() if k not in ["id", "changed", "reason"])))
-                                    
-                                    for key in all_keys:
-                                        original_val = note_fields.get(key, "(N/A)")
-                                        # Truncate original for display if really long? No, user asked for full.
-                                        # But let's clean html for display readability
-                                        if isinstance(original_val, str) and "<" in original_val:
-                                            # extremely basic html strip for display
-                                             original_val_clean = BeautifulSoup(original_val, "html.parser").get_text().strip()
-                                        else:
-                                             original_val_clean = original_val
-
-                                        new_val = item.get(key, "")
-                                        if new_val is None:
-                                            new_val = ""
-                                        
-                                        # Highlight modified fields
-                                        # If key is NOT in note_fields, it's a new field proposed by LLM
-                                        if key not in note_fields:
-                                            table.add_row(f"{key} (New)", "", f"[bold yellow]{new_val}[/bold yellow]")
-                                        elif str(new_val) != "" and str(new_val) != str(original_val):
-                                             # Changed existing field
-                                             table.add_row(key, str(original_val_clean), f"[bold green]{new_val}[/bold green]")
-                                        else:
-                                             # Unchanged or only in original
-                                             table.add_row(key, str(original_val_clean), str(new_val))
-                                    
-                                    console.print(table)
-                                    if "reason" in item:
-                                        console.print(f"[italic]Reason: {item['reason']}[/italic]")
-                                    console.print("\n")
 
                             batch_success = True
-                            break # Break retry loop on success
+                            break 
 
                         except (json.JSONDecodeError, ValueError) as e:
                             console.print(f"[yellow]Attempt {attempt+1}/{max_retries} failed: {e}. Retrying...[/yellow]")
                     else:
                         console.print(f"[yellow]Attempt {attempt+1}/{max_retries} failed: No JSON found. Retrying...[/yellow]")
-                        # console.print(improved_text[:500])
 
                 except Exception as e:
                     console.print(f"[red]Error processing batch attempt {attempt+1}: {e}[/red]")
             
             if not batch_success:
-                 console.print(f"[red]Batch failed after {max_retries} attempts. Skipping improvement for these cards (keeping original).[/red]")
-                 # We must still mark them as processed so we don't loop forever
+                 console.print(f"[red]Batch failed after {max_retries} attempts.[/red]")
                  if not preview:
                      for nid in batch_notes:
                          note = batch_notes[nid]
@@ -595,7 +449,6 @@ def process_apkg_with_resume(
                          col.update_note(note)
                          progress.advance(task)
 
-            # Save periodically
             if not preview:
                 col.save()
 
@@ -603,45 +456,6 @@ def process_apkg_with_resume(
     col.close()
     console.print(f"[bold green]Processing complete![/bold green] Processed {processed_count} notes.")
 
-    # 4.1 Re-compress and Cleanup
-    if not preview:
-        # If we had a compressed database, we should re-compress it to ensure changes are saved in the format Anki expects (if it prefers compressed)
-        # OR simply ensure we don't have conflicting files.
-        # Anki 2.1.50+ prefers collection.anki21b.
-        
-        # If we have collection.anki21, let's compress it back to collection.anki21b
-        anki21_path = os.path.join(working_dir, "collection.anki21")
-        anki21b_path = os.path.join(working_dir, "collection.anki21b")
-        anki2_path = os.path.join(working_dir, "collection.anki2")
-
-        if os.path.exists(anki21_path):
-            console.print("Re-compressing database to collection.anki21b...")
-            cctx = zstandard.ZstdCompressor()
-            with open(anki21_path, "rb") as ifh, open(anki21b_path, "wb") as ofh:
-                cctx.copy_stream(ifh, ofh)
-            
-            # Remove the uncompressed file so it's not zipped
-            os.remove(anki21_path)
-            console.print("Removed uncompressed collection.anki21")
-
-        # Also remove collection.anki2 if it exists and we have anki21b, to avoid ambiguity
-        # (Unless we originally only had anki2, in which case we keep it. But we prefer the newer format if available)
-        if os.path.exists(anki21b_path) and os.path.exists(anki2_path):
-             os.remove(anki2_path)
-             console.print("Removed legacy collection.anki2 to avoid conflicts.")
-
     # 5. Repackaging
-    if preview:
-        console.print("[bold yellow]Preview mode complete. No output file created.[/bold yellow]")
-        col.close()
-        return
-
-    console.print(f"Creating output package [bold]{output_apkg}[/bold]...")
-    with zipfile.ZipFile(output_apkg, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, _, files in os.walk(working_dir):
-            for file in files:
-                file_path = os.path.join(root, file)
-                arcname = os.path.relpath(file_path, working_dir)
-                zf.write(file_path, arcname)
-
+    _repackage_apkg(working_dir, output_apkg, console, preview)
     console.print("[bold green]Done![/bold green]")

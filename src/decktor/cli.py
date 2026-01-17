@@ -61,7 +61,7 @@ def process_command(
     if prompt is None:
         # Resolve default prompt path relative to this file
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        prompt = os.path.join(current_dir, "prompts", "cli_batch.txt")
+        prompt = os.path.join(current_dir, "prompts", "default.txt")
         if not os.path.exists(prompt):
             raise click.ClickException(f"Default prompt not found at {prompt}")
 

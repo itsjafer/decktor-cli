@@ -6,6 +6,8 @@
 
 DeckTor is a command-line tool to improve your Anki decks using Google's Gemini API. It processes cards individually to fix errors, improve clarity, or add content, giving you granular control over your flashcards.
 
+Note: This was almost entirely vibe-coded off the original repo.
+
 ## Features
 
 - **Gemini API Powered:** Uses Google's Gemini models (Flash, Flash Lite) for fast and effective card processing.
@@ -63,6 +65,8 @@ decktor process input.apkg output.apkg
 
 - `--model`: Choose the model to use. Default: `Gemini 2.5 Flash Lite`.
     - Example: `--model "Gemini 2.5 Flash"`
+- `--batch-size`: Number of cards to process before saving progress. Default: `10`.
+    - Example: `--batch-size 20`
 - `--preview`: Run in "dry run" mode. No changes are written to disk; changes are shown in the terminal.
 - `--limit`: Process only the first N cards. Useful for testing.
     - Example: `--limit 5`
@@ -73,6 +77,13 @@ decktor process input.apkg output.apkg
 - `--working-dir`: Directory for intermediate files (default: `.decktor_work`). **Keep this directory to resume if interrupted.**
 
 ### Example Workflow
+
+The default prompt assumes you're feeding it basic front/back cards. If you have a different type of card, adjust your prompt accordingly (see src/prompts/default.txt).
+
+1. **Use the default improvement prompt**
+   ```bash
+   decktor process my_deck.apkg improved_deck.apkg
+   ``` 
 
 1. **Preview changes on 5 cards:**
    ```bash
