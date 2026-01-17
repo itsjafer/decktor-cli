@@ -3,7 +3,7 @@
 import base64
 from pathlib import Path
 
-import torch
+
 
 
 def img_to_bytes(img_path):

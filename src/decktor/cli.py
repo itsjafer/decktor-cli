@@ -1,7 +1,7 @@
 import click
+import os
 
-from decktor.app import run_entrypoint as run_entrypoint
-from decktor.download_models import main as download_models
+from decktor.core import process_apkg_with_resume
 from decktor.models import SUPPORTED_MODELS
 
 
@@ -11,24 +11,71 @@ def main_group():
     pass
 
 
-# We wrap the existing function to fit the new CLI structure
-@main_group.command(name="run")
-def run_command():
-    """
-    Runs the main Decktor logic to process Anki cards.
-    """
-    run_entrypoint()
 
 
-@main_group.command(name="download-models")
+@main_group.command(name="process")
+@click.argument("input_path", type=click.Path(exists=True, dir_okay=False))
+@click.argument("output_path", type=click.Path(dir_okay=False))
 @click.option(
-    "--models",
-    multiple=True,
-    default=list(SUPPORTED_MODELS.keys()),
-    help="List of model names to download. If not provided, all supported models will be downloaded.",
+    "--model",
+    default="Gemini 2.5 Flash Lite",
+    help="Name of the LLM model to use.",
 )
-def download_models_command(models):
+@click.option(
+    "--prompt",
+    required=False,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the prompt template file. Defaults to cli_default.txt.",
+)
+@click.option(
+    "--working-dir",
+    default=".decktor_work",
+    type=click.Path(file_okay=False),
+    help="Directory to store intermediate files. Use the same directory to resume processing.",
+)
+@click.option(
+    "--batch-size",
+    default=10,
+    help="Number of cards to process before saving progress.",
+)
+@click.option(
+    "--preview",
+    is_flag=True,
+    default=False,
+    help="Preview changes without saving to disk (Dry Run).",
+)
+@click.option(
+    "--limit",
+    default=None,
+    type=int,
+    help="Limit the number of cards to process.",
+)
+def process_command(
+    input_path, output_path, model, prompt, working_dir, batch_size, preview, limit
+):
+    if prompt is None:
+        # Resolve default prompt path relative to this file
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        prompt = os.path.join(current_dir, "prompts", "cli_batch.txt")
+        if not os.path.exists(prompt):
+            raise click.ClickException(f"Default prompt not found at {prompt}")
     """
-    Downloads required LLM and Vision-Language models.
+    Process an .apkg file using an LLM.
+
+    This command extracts the deck, iterates through cards, improves them using the specified LLM,
+    and repackages the result. It supports resuming if interrupted by using the same --working-dir.
     """
-    download_models(models)
+    process_apkg_with_resume(
+        input_apkg=input_path,
+        output_apkg=output_path,
+        model_name=model,
+        prompt_path=prompt,
+        working_dir=working_dir,
+        batch_size=batch_size,
+        preview=preview,
+        limit=limit,
+    )
+
+
+if __name__ == "__main__":
+    main_group()

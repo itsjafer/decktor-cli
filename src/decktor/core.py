@@ -8,119 +8,104 @@ import tempfile
 import time
 import zipfile
 
-import streamlit as st
-import torch
-import zstandard
+import google.generativeai as genai
 from anki.collection import Collection
 from anki.decks import DeckManager
 from anki.models import ModelManager
 from bs4 import BeautifulSoup
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-from decktor.models import get_model_id
+import re
+from decktor.models import SUPPORTED_MODELS, get_model_id
 from decktor.utils import make_prompt
+from rich.progress import Progress, TextColumn, BarColumn, TimeRemainingColumn
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+
+import google.generativeai as genai
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
-@st.cache_resource(show_spinner="Loading LLM model...")
-def get_llm_model(model_name: str, quantize: bool = True):
+def get_llm_model(model_name: str):
     """Get the LLM model instance based on the model name.
 
     Args:
         model_name (str): The name of the LLM model.
-        quantize (bool): Whether to use 4-bit quantization for the model.
 
     Returns:
         An instance of the specified LLM model.
     """
-    print(f"Loading model: {model_name} with quantization={quantize}")
+    print(f"Loading model: {model_name}")
 
     # load the tokenizer and the model
-    model_id = get_model_id(model_name)
+    model_info = SUPPORTED_MODELS.get(model_name, {})
+    model_id = model_info.get("id")
 
-    # Configure 4-bit quantization
-    if quantize:
-        quantization_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.float16,  # Use bfloat16 for computation
-        )
-    else:
-        quantization_config = None
-
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
-
-    # Prepare model loading arguments
-    model_kwargs = {
-        "torch_dtype": torch.float16,
-        "quantization_config": quantization_config,
-        "device_map": "auto",
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        raise ValueError("GOOGLE_API_KEY not found in environment variables. Please set it in a .env file.")
+    
+    genai.configure(api_key=api_key)
+    
+    # Configure generation config
+    generation_config = {
+        "temperature": 0.7,
+        "top_p": 0.95,
+        "top_k": 40,
+        "max_output_tokens": 8192,
+        "response_mime_type": "application/json",
     }
-
-    model = AutoModelForCausalLM.from_pretrained(model_id, **model_kwargs)
-
-    return model, tokenizer
+    
+    model = genai.GenerativeModel(
+        model_name=model_id,
+        generation_config=generation_config,
+    )
+    return model
 
 
 def improve_card(
     card: str,
-    model: AutoModelForCausalLM,
-    tokenizer: AutoTokenizer,
+    model: genai.GenerativeModel,
     prompt_template: str,
-    max_new_tokens: int = 8192,
-    thinking_mode: bool = False,
 ) -> tuple[str, dict]:
     """Improve an Anki card using the specified LLM model and prompt template.
 
     Args:
         card (str): The original Anki card content.
         model: The LLM model to use for improvement.
-        tokenizer: The tokenizer for the model.
         prompt_template (str): The prompt template to guide the LLM.
-        max_new_tokens (int): Maximum number of new tokens to generate.
 
     Returns:
         tuple[str, dict]: The improved Anki card content and performance metrics.
     """
     # Track timing
     start_time = time.time()
-
+    
     # prepare the model input
     prompt = make_prompt(card, prompt_template)
-    messages = [{"role": "user", "content": prompt}]
-    text = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True,
-        enable_thinking=thinking_mode,
-    )
-    model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
-
-    # Track tokenization time
-    tokenization_time = time.time() - start_time
-    input_token_count = model_inputs.input_ids.shape[1]
-
-    # conduct text completion
-    generation_start = time.time()
-    generated_ids = model.generate(
-        **model_inputs,
-        max_new_tokens=max_new_tokens,
-        use_cache=True,  # Enable KV cache for faster generation
-    )
-
-    generation_time = time.time() - generation_start
-
-    output_ids = generated_ids[0][len(model_inputs.input_ids[0]) :].tolist()
-    output_token_count = len(output_ids)
-
-    # parsing thinking content
+    
+    # API execution path
     try:
-        # rindex finding 151668 (</think>)
-        index = len(output_ids) - output_ids[::-1].index(151668)
-    except ValueError:
-        index = 0
-
-    thinking_content = tokenizer.decode(output_ids[:index], skip_special_tokens=True).strip("\n")
-    content = tokenizer.decode(output_ids[index:], skip_special_tokens=True).strip("\n")
+        response = model.generate_content(prompt)
+        content = response.text
+        
+        # Simple metrics for API (token counts might need usage metadata access if available)
+        # Gemini response usually has usage_metadata
+        input_token_count = 0
+        output_token_count = 0
+        if response.usage_metadata:
+            input_token_count = response.usage_metadata.prompt_token_count
+            output_token_count = response.usage_metadata.candidates_token_count
+        
+        generation_time = time.time() - start_time # Approximate
+        tokenization_time = 0
+        
+    except Exception as e:
+        # Handle API errors
+        print(f"API Error: {e}")
+        return str(e), {}
 
     # Calculate performance metrics
     total_time = time.time() - start_time
@@ -154,11 +139,20 @@ def _extract_db_from_apkg(apkg_stream: io.BytesIO, temp_dir: str) -> str:
     db_path = ""
 
     with zipfile.ZipFile(apkg_stream, "r") as z:
-        db_filename = next(
-            (name for name in z.namelist() if name.startswith("collection.anki2")), None
-        )
+        names = z.namelist()
+        if "collection.anki21b" in names:
+            db_filename = "collection.anki21b"
+        elif "collection.anki2" in names:
+            db_filename = "collection.anki2"
+        else:
+            # Fallback for nested folders or other variations
+            db_filename = next(
+                (name for name in names if name.endswith("collection.anki21b")), 
+                next((name for name in names if name.endswith("collection.anki2")), None)
+            )
+
         if not db_filename:
-            raise FileNotFoundError("Could not find 'collection.anki2' in the .apkg stream.")
+            raise FileNotFoundError("Could not find 'collection.anki2' or 'collection.anki21b' in the .apkg stream.")
 
         compressed_db_path = os.path.join(temp_dir, db_filename)
 
@@ -276,3 +270,359 @@ def create_apkg(
         shutil.rmtree(temp_dir)
 
     return zip_bytes_io
+
+
+def process_apkg_with_resume(
+    input_apkg: str,
+    output_apkg: str,
+    model_name: str,
+    prompt_path: str,
+    working_dir: str,
+    batch_size: int = 10,
+    preview: bool = False,
+    limit: int | None = None,
+):
+    """
+    Process an .apkg file using an LLM, with resume capability.
+
+    Args:
+        input_apkg: Path to the input .apkg file.
+        output_apkg: Path to the output .apkg file.
+        model_name: Name of the LLM model to use.
+        prompt_path: Path to the prompt template file.
+        working_dir: Directory to store intermediate files.
+        working_dir: Directory to store intermediate files.
+        batch_size: Number of cards to process before saving.
+        preview: If True, do not save changes to disk (Dry Run).
+        limit: Maximum number of cards to process.
+    """
+    console = Console()
+
+    if preview:
+        console.print(
+            Panel.fit(
+                "[bold yellow]PREVIEW MODE ENABLED[/bold yellow]\n"
+                "Changes will NOT be saved to the database or output file.\n"
+                "Showing pretty diffs of changes.",
+                title="⚠️  DRY RUN  ⚠️",
+                border_style="yellow",
+            )
+        )
+
+    # 1. Setup Phase
+    if not os.path.exists(working_dir):
+        os.makedirs(working_dir)
+        console.print(f"[bold green]Created working directory:[/bold green] {working_dir}")
+        # Unzip everything
+        console.print(f"Extracting [bold]{input_apkg}[/bold]...")
+        with zipfile.ZipFile(input_apkg, "r") as zf:
+            zf.extractall(working_dir)
+    else:
+        # Check if it looks like a valid unzipped deck
+        if not any(os.path.exists(os.path.join(working_dir, f)) for f in ["collection.anki2", "collection.anki21", "collection.anki21b"]):
+            console.print(
+                f"[bold red]Error:[/bold red] Working directory {working_dir} exists but does not contain a valid collection file. "
+                "Please use a different working directory or clear it."
+            )
+            return
+
+        console.print(
+            f"[bold yellow]Resuming[/bold yellow] from existing working directory: {working_dir}"
+        )
+
+    # 2. Database Setup
+    # 2. Database Setup
+    anki21b_path = os.path.join(working_dir, "collection.anki21b")
+    anki2_path = os.path.join(working_dir, "collection.anki2")
+    
+    db_path = anki2_path
+
+    if os.path.exists(anki21b_path):
+        console.print(f"[bold green]Found compressed database:[/bold green] {anki21b_path}")
+        # Decompress to collection.anki21
+        db_path = os.path.join(working_dir, "collection.anki21")
+        if not os.path.exists(db_path): # verify if we need to decompress
+            console.print("Decompressing database...")
+            dctx = zstandard.ZstdDecompressor()
+            with open(anki21b_path, "rb") as ifh, open(db_path, "wb") as ofh:
+                dctx.copy_stream(ifh, ofh)
+    elif os.path.exists(anki2_path):
+        db_path = anki2_path
+    else:
+        console.print(f"[bold red]Error:[/bold red] No valid collection file found in {working_dir}.")
+        return
+
+    col = Collection(db_path)
+    console.print(f"Opened collection at {db_path}")
+
+    # 3. Model Loading
+    console.print(f"Loading model [bold]{model_name}[/bold]...")
+    model = get_llm_model(model_name)
+    
+    with open(prompt_path, "r") as f:
+        prompt_template = f.read()
+
+    # 4. Processing Loop
+    # 4. Processing Loop
+    processed_tag = "decktor-processed"
+    
+    # Find all notes
+    # We want to iterate notes, not cards, to avoid processing the same content twice if multiple cards share a note.
+    all_nids = col.find_notes("")
+    total_notes = len(all_nids)
+    
+    # Filter for unprocessed notes
+    # We can check if the note has the tag
+    unprocessed_nids = []
+    for nid in all_nids:
+        note = col.get_note(nid)
+        if not note.has_tag(processed_tag):
+            unprocessed_nids.append(nid)
+            
+    notes_to_process_count = len(unprocessed_nids)
+    console.print(f"Found {total_notes} total notes. {notes_to_process_count} to process.")
+
+    processed_count = 0
+    
+    # Apply limit
+    if limit is not None:
+        console.print(f"[yellow]Limiting processing to {limit} cards.[/yellow]")
+        notes_to_process_count = min(notes_to_process_count, limit)
+        unprocessed_nids = unprocessed_nids[:limit]
+
+    # Batching logic
+    batches = [unprocessed_nids[i:i + batch_size] for i in range(0, len(unprocessed_nids), batch_size)]
+
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TimeRemainingColumn(),
+    ) as progress:
+        task = progress.add_task("[cyan]Processing notes...", total=notes_to_process_count)
+
+        for batch_nids in batches:
+            batch_payload = []
+            batch_notes = {} # Map nid -> note object
+
+            for nid in batch_nids:
+                try:
+                    note = col.get_note(nid)
+                    batch_notes[nid] = note
+                    
+                    # Heuristic: try to find "Front" and "Back" fields
+                    field_names = [f['name'] for f in note.note_type()['flds']]
+                    fields = dict(zip(field_names, note.fields))
+                    
+                    front_text = fields.get("Front", "")
+                    back_text = fields.get("Back", "")
+                    
+                    # If fields are not named Front/Back, fallback to first/second
+                    if not front_text and not back_text:
+                         if len(note.fields) > 0:
+                             front_text = note.fields[0]
+                         if len(note.fields) > 1:
+                             back_text = note.fields[1]
+
+                    # Clean HTML for the LLM
+                    soup_front = BeautifulSoup(front_text, "html.parser")
+                    clean_front = soup_front.get_text(separator="\n").strip()
+                    soup_back = BeautifulSoup(back_text, "html.parser")
+                    clean_back = soup_back.get_text(separator="\n").strip()
+
+                    batch_payload.append({
+                        "id": nid,
+                        "front": clean_front,
+                        "back": clean_back
+                    })
+                except Exception as e:
+                    console.print(f"[red]Failed to prepare note {nid} for batch: {e}[/red]")
+            
+            if not batch_payload:
+                continue
+
+            # Call LLM with batch
+            max_retries = 3
+            batch_success = False
+
+            for attempt in range(max_retries):
+                try:
+                    cards_json = json.dumps(batch_payload, indent=2, ensure_ascii=False)
+                    
+                    # Construct the full prompt manually to handle {cards} vs {card}
+                    if "{cards}" in prompt_template:
+                        full_prompt = prompt_template.replace("{cards}", cards_json)
+                    else:
+                        # Fallback for old prompts
+                        full_prompt = prompt_template.replace("{card}", cards_json)
+
+                    # Use improve_card to handle generation, passing identity template
+                    improved_text, _ = improve_card(
+                        full_prompt, 
+                        model, 
+                        "{card}" 
+                    )
+                    
+                    # Parse Batch Output
+                    json_match = re.search(r"\{.*\}", improved_text, re.DOTALL)
+                    if json_match:
+                        try:
+                            response_json = json.loads(json_match.group(0))
+                            # Handle both {cards: [...]} and just [...] (unlikely if prompt is followed, but good for robustness)
+                            if "cards" in response_json:
+                                improved_cards = response_json["cards"]
+                            elif isinstance(response_json, list):
+                                improved_cards = response_json
+                            else:
+                                raise ValueError("Unexpected JSON format: missing 'cards' key or not a list")
+                                
+                            # Create a map for easy lookup
+                            improved_map = {str(item["id"]): item for item in improved_cards}
+                            
+                            # Validate Batch
+                            validation_error = False
+                            for nid in batch_notes:
+                                nid_str = str(nid)
+                                if nid_str in improved_map:
+                                    item = improved_map[nid_str]
+                                    if item.get("changed", False):
+                                        if not item.get("front") or not item.get("back"):
+                                            console.print(f"[yellow]Validation failed for card {nid}: Empty front/back in response. Retrying...[/yellow]")
+                                            validation_error = True
+                                            break
+                            
+                            if validation_error:
+                                continue # Retry loop
+
+                            # If we got here, validation passed
+                            for nid in batch_notes:
+                                note = batch_notes[nid]
+                                # nid is int, convert to str for lookup if JSON used strings
+                                nid_str = str(nid)
+                                
+                                if nid_str in improved_map:
+                                    item = improved_map[nid_str]
+                                    if item.get("changed", False):
+                                        new_front = item.get("front")
+                                        if new_front is None:
+                                            new_front = ""
+                                        else:
+                                            new_front = str(new_front)
+
+                                        new_back = item.get("back")
+                                        if new_back is None:
+                                            new_back = ""
+                                        else:
+                                            new_back = str(new_back)
+                                        
+                                        # Update Note
+                                        field_names = [f['name'] for f in note.note_type()['flds']]
+                                        fields = dict(zip(field_names, note.fields))
+
+                                        if "Front" in fields:
+                                            note["Front"] = new_front
+                                        else:
+                                            note.fields[0] = new_front 
+                                            
+                                        if "Back" in fields:
+                                            note["Back"] = new_back
+                                        elif len(note.fields) > 1:
+                                            note.fields[1] = new_back
+
+                                # Always mark processed
+                                if not preview:
+                                    note.add_tag(processed_tag)
+                                    col.update_note(note)
+                                
+                                processed_count += 1
+                                progress.advance(task)
+                                
+                                # Preview logic
+                                if (preview or limit is not None) and nid_str in improved_map:
+                                    item = improved_map[nid_str]
+                                    title_suffix = "(Dry Run)" if preview else "(Limit Applied)"
+                                    table = Table(title=f"Card {nid} {title_suffix}", show_lines=True)
+                                    table.add_column("Field", style="cyan", no_wrap=True)
+                                    table.add_column("Original", style="magenta")
+                                    table.add_column("Improved", style="green")
+
+                                    # Show original vs new
+                                    # Note: we didn't store original strictly, but we can grab field values or use batch_payload
+                                    # For simplicity, just show what we have in item
+                                    table.add_row("Front", "...", item.get("front", ""))
+                                    table.add_row("Back", "...", item.get("back", ""))
+                                    console.print(table)
+                                    console.print("\n")
+
+                            batch_success = True
+                            break # Break retry loop on success
+
+                        except (json.JSONDecodeError, ValueError) as e:
+                             console.print(f"[yellow]Attempt {attempt+1}/{max_retries} failed: {e}. Retrying...[/yellow]")
+                    else:
+                        console.print(f"[yellow]Attempt {attempt+1}/{max_retries} failed: No JSON found. Retrying...[/yellow]")
+                        # console.print(improved_text[:500])
+
+                except Exception as e:
+                    console.print(f"[red]Error processing batch attempt {attempt+1}: {e}[/red]")
+            
+            if not batch_success:
+                 console.print(f"[red]Batch failed after {max_retries} attempts. Skipping improvement for these cards (keeping original).[/red]")
+                 # We must still mark them as processed so we don't loop forever
+                 if not preview:
+                     for nid in batch_notes:
+                         note = batch_notes[nid]
+                         note.add_tag(processed_tag)
+                         col.update_note(note)
+                         progress.advance(task)
+
+            # Save periodically
+            if not preview:
+                col.save()
+
+    col.save()
+    col.close()
+    console.print(f"[bold green]Processing complete![/bold green] Processed {processed_count} notes.")
+
+    # 4.1 Re-compress and Cleanup
+    if not preview:
+        # If we had a compressed database, we should re-compress it to ensure changes are saved in the format Anki expects (if it prefers compressed)
+        # OR simply ensure we don't have conflicting files.
+        # Anki 2.1.50+ prefers collection.anki21b.
+        
+        # If we have collection.anki21, let's compress it back to collection.anki21b
+        anki21_path = os.path.join(working_dir, "collection.anki21")
+        anki21b_path = os.path.join(working_dir, "collection.anki21b")
+        anki2_path = os.path.join(working_dir, "collection.anki2")
+
+        if os.path.exists(anki21_path):
+            console.print("Re-compressing database to collection.anki21b...")
+            cctx = zstandard.ZstdCompressor()
+            with open(anki21_path, "rb") as ifh, open(anki21b_path, "wb") as ofh:
+                cctx.copy_stream(ifh, ofh)
+            
+            # Remove the uncompressed file so it's not zipped
+            os.remove(anki21_path)
+            console.print("Removed uncompressed collection.anki21")
+
+        # Also remove collection.anki2 if it exists and we have anki21b, to avoid ambiguity
+        # (Unless we originally only had anki2, in which case we keep it. But we prefer the newer format if available)
+        if os.path.exists(anki21b_path) and os.path.exists(anki2_path):
+             os.remove(anki2_path)
+             console.print("Removed legacy collection.anki2 to avoid conflicts.")
+
+    # 5. Repackaging
+    if preview:
+        console.print("[bold yellow]Preview mode complete. No output file created.[/bold yellow]")
+        col.close()
+        return
+
+    console.print(f"Creating output package [bold]{output_apkg}[/bold]...")
+    with zipfile.ZipFile(output_apkg, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, _, files in os.walk(working_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                arcname = os.path.relpath(file_path, working_dir)
+                zf.write(file_path, arcname)
+
+    console.print("[bold green]Done![/bold green]")

@@ -14,18 +14,30 @@ requires-python = ">=3.10"
 license = { file = "LICENSE" }
 
 dependencies = [
-    "streamlit",
-    "scipy>=1.10.0",
-    "matplotlib>=3.6.0",
-    "opencv-python-headless>=4.5.5.64",
-    "accelerate",
-    "bitsandbytes>=0.46.1",
-    "anki",
+    "anki==24.11",
+    "protobuf<6.0.0",
     "zstandard",
+    "rich",
+    "beautifulsoup4",
+    "google-generativeai",
+    "python-dotenv",
+    "click",
 ]
 
 [project.scripts]
 decktor = "decktor.cli:main_group"
 
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "isort",
+    "flake8",
+]
+
 [tool.setuptools]
 package-dir = { "" = "src" }
+include-package-data = true
+
+[tool.setuptools.package-data]
+decktor = ["*"]

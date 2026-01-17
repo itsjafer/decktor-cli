@@ -1,15 +1,19 @@
 SUPPORTED_MODELS = {
-    "Qwen3-4B (Non-Thinking only)": {
-        "id": "Qwen/Qwen3-4B-Instruct-2507",
-        "description": "Low memory required, fast inference.",
+    "Gemini 2.5 Flash Lite": {
+        "id": "gemini-2.5-flash-lite",
+        "description": "Fast and lightweight API model.",
+        "type": "api",
     },
-    "Qwen3-4B (Thinking only)": {
-        "id": "Qwen/Qwen3-4B-Thinking-2507",
-        "description": "Low memory required, slow inference.",
+    "Gemini 2.5 Flash": {
+        "id": "gemini-2.5-flash",
+        "description": "Balanced API model.",
+        "type": "api",
     },
-    "Qwen3-32B (With/Without Thinking)": {
-        "id": "Qwen/Qwen3-32B",
-        "description": "High memory required, powerful, fast in non-thinking mode, slower in thinking mode.",
+    "Gemini 3.0 Flash Preview": {
+        "id": "gemini-3-flash-preview",
+        "description": "Next-gen API model.",
+        "type": "api",
+        "thinking": False,
     },
 }
 
