@@ -11,7 +11,7 @@ Your task is to audit and clean a list of Anki flashcards. The input data is has
 **FIELD RULES:**
 
 **1. FIELD: Script (The Arabic)**
-   - **Spelling:** Use Iraqi characters (گ, چ, پ) and full vowels reflecting spoken Baghdadi Arabic.
+   - **Spelling:** Use Iraqi characters (گ, چ, پ) and full vowels reflecting spoken Najafi Arabic.
    - **Structure by Part of Speech:**
      - **NOUNS:** `[Singular] / [Plural]`
      - **VERBS:** `[Present (3rd p.m.sg)] / [Past (3rd p.m.sg)] / [Masdar]`
@@ -23,7 +23,7 @@ Your task is to audit and clean a list of Anki flashcards. The input data is has
    - **System:** **Modified ALA-LC** (strictly phonemic for the dialect).
      - **Vowels:** ā, ī, ū, a, i, u, ō, ē.
      - **Consonants:** ṣ, ḥ, ṭ, ẓ, ʿ, gh, kh, q (or g for گ), ch (for چ), p (for پ).
-   - Transliterate the *full* content of the Script line (e.g., "Singular / Plural").
+   - Transliterate the *full* content of the Script line (e.g., "Singular / Plural") based on the pronunciation in Najaf.
 
 **3. FIELD: Meaning (The English)**
    - Clarify the meaning to match Iraqi usage.

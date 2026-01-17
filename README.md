@@ -15,7 +15,7 @@ DeckTor is a command-line tool to improve your Anki decks using Google's Gemini 
 
 ## Requirements
 
-- **Python 3.10+**
+- **Python 3.9+**
 - **Google Gemini API Key:** Required for using Gemini models.
 
 ## Installation
@@ -66,8 +66,10 @@ decktor process input.apkg output.apkg
 - `--preview`: Run in "dry run" mode. No changes are written to disk; changes are shown in the terminal.
 - `--limit`: Process only the first N cards. Useful for testing.
     - Example: `--limit 5`
-- `--prompt`: Path to a custom prompt text file.
+- `--prompt`: Path to a custom prompt text file. The prompt should output JSON.
     - Example: `--prompt my_custom_prompt.txt`
+- `--exclude-fields`: Comma-separated list of fields to **exclude** from the LLM context. These fields will be ignored by the LLM and preserved untouched in the output.
+    - Example: `--exclude-fields "Audio,Image"`
 - `--working-dir`: Directory for intermediate files (default: `.decktor_work`). **Keep this directory to resume if interrupted.**
 
 ### Example Workflow
@@ -77,15 +79,15 @@ decktor process input.apkg output.apkg
    decktor process my_deck.apkg improved_deck.apkg --preview --limit 5
    ```
 
-2. **Process the full deck:**
+2. **Process specific fields (filtering out Audio):**
    ```bash
-   decktor process my_deck.apkg improved_deck.apkg
+   decktor process my_deck.apkg improved_deck.apkg --exclude-fields "Audio" --prompt my_prompt.txt
    ```
 
 3. **Resume if interrupted:**
    (Run the exact same command again)
    ```bash
-   decktor process my_deck.apkg improved_deck.apkg
+   decktor process my_deck.apkg improved_deck.apkg --exclude-fields "Audio"
    ```
 
 ## License

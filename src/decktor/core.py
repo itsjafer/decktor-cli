@@ -7,6 +7,8 @@ import shutil
 import tempfile
 import time
 import zipfile
+import zstandard
+from typing import Optional
 
 import google.generativeai as genai
 from anki.collection import Collection
@@ -280,7 +282,8 @@ def process_apkg_with_resume(
     working_dir: str,
     batch_size: int = 10,
     preview: bool = False,
-    limit: int | None = None,
+    limit: Optional[int] = None,
+    exclude_fields: list[str] = None,
 ):
     """
     Process an .apkg file using an LLM, with resume capability.
@@ -410,31 +413,29 @@ def process_apkg_with_resume(
                     note = col.get_note(nid)
                     batch_notes[nid] = note
                     
-                    # Heuristic: try to find "Front" and "Back" fields
+                    # Generic Field Extraction
                     field_names = [f['name'] for f in note.note_type()['flds']]
                     fields = dict(zip(field_names, note.fields))
                     
-                    front_text = fields.get("Front", "")
-                    back_text = fields.get("Back", "")
+                    # Prepare cleaned fields for LLM
+                    cleaned_fields = {}
+                    exclude_set = set(exclude_fields or [])
                     
-                    # If fields are not named Front/Back, fallback to first/second
-                    if not front_text and not back_text:
-                         if len(note.fields) > 0:
-                             front_text = note.fields[0]
-                         if len(note.fields) > 1:
-                             back_text = note.fields[1]
+                    for name, value in fields.items():
+                        if name in exclude_set:
+                            continue
+                            
+                        # Clean HTML for the LLM input
+                        soup = BeautifulSoup(value, "html.parser")
+                        cleaned_val = soup.get_text(separator="\n").strip()
+                        cleaned_fields[name] = cleaned_val
 
-                    # Clean HTML for the LLM
-                    soup_front = BeautifulSoup(front_text, "html.parser")
-                    clean_front = soup_front.get_text(separator="\n").strip()
-                    soup_back = BeautifulSoup(back_text, "html.parser")
-                    clean_back = soup_back.get_text(separator="\n").strip()
-
-                    batch_payload.append({
+                    payload_item = {
                         "id": nid,
-                        "front": clean_front,
-                        "back": clean_back
-                    })
+                        **cleaned_fields
+                    }
+                    batch_payload.append(payload_item)
+
                 except Exception as e:
                     console.print(f"[red]Failed to prepare note {nid} for batch: {e}[/red]")
             
@@ -456,7 +457,7 @@ def process_apkg_with_resume(
                         # Fallback for old prompts
                         full_prompt = prompt_template.replace("{card}", cards_json)
 
-                    # Use improve_card to handle generation, passing identity template
+                    # Use improve_card to handle generation
                     improved_text, _ = improve_card(
                         full_prompt, 
                         model, 
@@ -481,53 +482,39 @@ def process_apkg_with_resume(
                             
                             # Validate Batch
                             validation_error = False
-                            for nid in batch_notes:
-                                nid_str = str(nid)
-                                if nid_str in improved_map:
-                                    item = improved_map[nid_str]
-                                    if item.get("changed", False):
-                                        if not item.get("front") or not item.get("back"):
-                                            console.print(f"[yellow]Validation failed for card {nid}: Empty front/back in response. Retrying...[/yellow]")
-                                            validation_error = True
-                                            break
+                            # Validation: Currently loose. We verify that basic structure returned for matched IDs.
+                            # Strict validation of specific fields is hard without knowing schema.
+                            # We can check if "changed" is True, we expect SOME fields to follow.
                             
-                            if validation_error:
-                                continue # Retry loop
+                            # If we got here, we assume format is okay enough to try updating.
 
-                            # If we got here, validation passed
                             for nid in batch_notes:
                                 note = batch_notes[nid]
-                                # nid is int, convert to str for lookup if JSON used strings
                                 nid_str = str(nid)
                                 
                                 if nid_str in improved_map:
                                     item = improved_map[nid_str]
                                     if item.get("changed", False):
-                                        new_front = item.get("front")
-                                        if new_front is None:
-                                            new_front = ""
-                                        else:
-                                            new_front = str(new_front)
-
-                                        new_back = item.get("back")
-                                        if new_back is None:
-                                            new_back = ""
-                                        else:
-                                            new_back = str(new_back)
-                                        
-                                        # Update Note
+                                        # Update keys that match existing fields
                                         field_names = [f['name'] for f in note.note_type()['flds']]
-                                        fields = dict(zip(field_names, note.fields))
-
-                                        if "Front" in fields:
-                                            note["Front"] = new_front
-                                        else:
-                                            note.fields[0] = new_front 
-                                            
-                                        if "Back" in fields:
-                                            note["Back"] = new_back
-                                        elif len(note.fields) > 1:
-                                            note.fields[1] = new_back
+                                        # Create a map of lower-case field names to real names for case-insensitive matching if needed,
+                                        # but usually exact match is best. Let's try exact match first.
+                                        
+                                        updated_any = False
+                                        for field_name in field_names:
+                                            if field_name in item and item[field_name] is not None:
+                                                 # Update field
+                                                 try:
+                                                     note[field_name] = str(item[field_name])
+                                                     updated_any = True
+                                                 except KeyError:
+                                                     # Should not happen given we iterate from note field_names
+                                                     pass
+                                        
+                                        if not updated_any:
+                                            # If no field names matched, maybe print a warning?
+                                            # console.print(f"[yellow]Warning: Card {nid} was marked changed but returned keys didn't match note fields: {list(item.keys())} vs {field_names}[/yellow]")
+                                            pass
 
                                 # Always mark processed
                                 if not preview:
@@ -536,29 +523,61 @@ def process_apkg_with_resume(
                                 
                                 processed_count += 1
                                 progress.advance(task)
-                                
-                                # Preview logic
+                                                                # Preview logic
                                 if (preview or limit is not None) and nid_str in improved_map:
                                     item = improved_map[nid_str]
                                     title_suffix = "(Dry Run)" if preview else "(Limit Applied)"
+                                    
+                                    # Create table with overflow="fold" to show full content
                                     table = Table(title=f"Card {nid} {title_suffix}", show_lines=True)
                                     table.add_column("Field", style="cyan", no_wrap=True)
-                                    table.add_column("Original", style="magenta")
-                                    table.add_column("Improved", style="green")
+                                    table.add_column("Original", style="magenta", overflow="fold")
+                                    table.add_column("Improved", style="green", overflow="fold")
 
-                                    # Show original vs new
-                                    # Note: we didn't store original strictly, but we can grab field values or use batch_payload
-                                    # For simplicity, just show what we have in item
-                                    table.add_row("Front", "...", item.get("front", ""))
-                                    table.add_row("Back", "...", item.get("back", ""))
+                                    field_names = [f['name'] for f in note.note_type()['flds']]
+                                    note_fields = dict(zip(field_names, note.fields))
+
+                                    # Show all fields that exist in the response or in the note
+                                    # We prioritize fields returned by LLM to show changes
+                                    
+                                    # Combine keys from note and item to show everything relevant
+                                    all_keys = sorted(list(set(field_names) | set(k for k in item.keys() if k not in ["id", "changed", "reason"])))
+                                    
+                                    for key in all_keys:
+                                        original_val = note_fields.get(key, "(N/A)")
+                                        # Truncate original for display if really long? No, user asked for full.
+                                        # But let's clean html for display readability
+                                        if isinstance(original_val, str) and "<" in original_val:
+                                            # extremely basic html strip for display
+                                             original_val_clean = BeautifulSoup(original_val, "html.parser").get_text().strip()
+                                        else:
+                                             original_val_clean = original_val
+
+                                        new_val = item.get(key, "")
+                                        if new_val is None:
+                                            new_val = ""
+                                        
+                                        # Highlight modified fields
+                                        # If key is NOT in note_fields, it's a new field proposed by LLM
+                                        if key not in note_fields:
+                                            table.add_row(f"{key} (New)", "", f"[bold yellow]{new_val}[/bold yellow]")
+                                        elif str(new_val) != "" and str(new_val) != str(original_val):
+                                             # Changed existing field
+                                             table.add_row(key, str(original_val_clean), f"[bold green]{new_val}[/bold green]")
+                                        else:
+                                             # Unchanged or only in original
+                                             table.add_row(key, str(original_val_clean), str(new_val))
+                                    
                                     console.print(table)
+                                    if "reason" in item:
+                                        console.print(f"[italic]Reason: {item['reason']}[/italic]")
                                     console.print("\n")
 
                             batch_success = True
                             break # Break retry loop on success
 
                         except (json.JSONDecodeError, ValueError) as e:
-                             console.print(f"[yellow]Attempt {attempt+1}/{max_retries} failed: {e}. Retrying...[/yellow]")
+                            console.print(f"[yellow]Attempt {attempt+1}/{max_retries} failed: {e}. Retrying...[/yellow]")
                     else:
                         console.print(f"[yellow]Attempt {attempt+1}/{max_retries} failed: No JSON found. Retrying...[/yellow]")
                         # console.print(improved_text[:500])

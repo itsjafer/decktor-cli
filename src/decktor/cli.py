@@ -50,8 +50,13 @@ def main_group():
     type=int,
     help="Limit the number of cards to process.",
 )
+@click.option(
+    "--exclude-fields",
+    default=None,
+    help="Comma-separated list of fields to exclude from the LLM prompt (e.g., 'Audio,Image').",
+)
 def process_command(
-    input_path, output_path, model, prompt, working_dir, batch_size, preview, limit
+    input_path, output_path, model, prompt, working_dir, batch_size, preview, limit, exclude_fields
 ):
     if prompt is None:
         # Resolve default prompt path relative to this file
@@ -59,6 +64,11 @@ def process_command(
         prompt = os.path.join(current_dir, "prompts", "cli_batch.txt")
         if not os.path.exists(prompt):
             raise click.ClickException(f"Default prompt not found at {prompt}")
+
+    exclude_fields_list = []
+    if exclude_fields:
+        exclude_fields_list = [f.strip() for f in exclude_fields.split(",")]
+
     """
     Process an .apkg file using an LLM.
 
@@ -74,6 +84,7 @@ def process_command(
         batch_size=batch_size,
         preview=preview,
         limit=limit,
+        exclude_fields=exclude_fields_list,
     )
 
 
