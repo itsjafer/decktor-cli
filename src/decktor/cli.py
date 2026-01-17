@@ -55,8 +55,14 @@ def main_group():
     default=None,
     help="Comma-separated list of fields to exclude from the LLM prompt (e.g., 'Audio,Image').",
 )
+@click.option(
+    "--reprocess-all",
+    is_flag=True,
+    default=False,
+    help="Reprocess all cards, ignoring 'decktor-processed' tag.",
+)
 def process_command(
-    input_path, output_path, model, prompt, working_dir, batch_size, preview, limit, exclude_fields
+    input_path, output_path, model, prompt, working_dir, batch_size, preview, limit, exclude_fields, reprocess_all
 ):
     if prompt is None:
         # Resolve default prompt path relative to this file
@@ -85,6 +91,7 @@ def process_command(
         preview=preview,
         limit=limit,
         exclude_fields=exclude_fields_list,
+        reprocess_all=reprocess_all,
     )
 
 

@@ -15,6 +15,11 @@ SUPPORTED_MODELS = {
         "type": "api",
         "thinking": False,
     },
+    "GPT4Free (Free)": {
+        "id": "free",
+        "description": "Uses g4f to access free LLM providers (no key required).",
+        "type": "free",
+    },
 }
 
 

@@ -23,6 +23,8 @@ dependencies = [
     "google-generativeai",
     "python-dotenv",
     "click",
+    "g4f",
+    "curl_cffi",
 ]
 
 [project.scripts]

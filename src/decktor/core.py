@@ -8,7 +8,6 @@ import zipfile
 import re
 from typing import Optional, List, Dict, Any, Tuple
 
-import google.generativeai as genai
 import zstandard
 from anki.collection import Collection
 from dotenv import load_dotenv
@@ -20,50 +19,36 @@ from bs4 import BeautifulSoup
 
 from decktor.models import SUPPORTED_MODELS
 from decktor.utils import make_prompt
+from decktor.llm import LLMProvider, GeminiProvider, FreeProvider
 
 load_dotenv()
 
 
-def get_llm_model(model_name: str) -> genai.GenerativeModel:
+def get_llm_model(model_name: str) -> LLMProvider:
     """Get the LLM model instance based on the model name.
 
     Args:
         model_name (str): The name of the LLM model.
 
     Returns:
-        An instance of the specified LLM model.
+        LLMProvider: An instance of the specified LLM provider.
     """
     print(f"Loading model: {model_name}")
 
-    # load the tokenizer and the model
     model_info = SUPPORTED_MODELS.get(model_name, {})
-    model_id = model_info.get("id")
+    model_type = model_info.get("type", "api")
 
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        raise ValueError("GOOGLE_API_KEY not found in environment variables. Please set it in a .env file.")
+    # If explicitly free type or name implies free
+    if model_type == "free" or model_name.lower() == "free":
+        return FreeProvider(model_info.get("id", "gpt-4o-mini")) 
     
-    genai.configure(api_key=api_key)
-    
-    # Configure generation config
-    generation_config = {
-        "temperature": 0.7,
-        "top_p": 0.95,
-        "top_k": 40,
-        "max_output_tokens": 8192,
-        "response_mime_type": "application/json",
-    }
-    
-    model = genai.GenerativeModel(
-        model_name=model_id,
-        generation_config=generation_config,
-    )
-    return model
+    # Default to Gemini
+    return GeminiProvider(model_name)
 
 
 def improve_card(
     card: str,
-    model: genai.GenerativeModel,
+    model: LLMProvider,
     prompt_template: str,
 ) -> tuple[str, dict]:
     """Improve an Anki card using the specified LLM model and prompt template.
@@ -76,49 +61,21 @@ def improve_card(
     Returns:
         tuple[str, dict]: The improved Anki card content and performance metrics.
     """
-    # Track timing
-    start_time = time.time()
-    
     # prepare the model input
     prompt = make_prompt(card, prompt_template)
     
-    # API execution path
-    try:
-        response = model.generate_content(prompt)
-        content = response.text
-        
-        # Simple metrics for API (token counts might need usage metadata access if available)
-        # Gemini response usually has usage_metadata
-        input_token_count = 0
-        output_token_count = 0
-        if response.usage_metadata:
-            input_token_count = response.usage_metadata.prompt_token_count
-            output_token_count = response.usage_metadata.candidates_token_count
-        
-        generation_time = time.time() - start_time # Approximate
-        tokenization_time = 0
-        
-    except Exception as e:
-        # Handle API errors
-        print(f"API Error: {e}")
-        return str(e), {}
+    # Provider execution path
+    content, metrics = model.generate(prompt)
 
-    # Calculate performance metrics
-    total_time = time.time() - start_time
-    tokens_per_second = output_token_count / generation_time if generation_time > 0 else 0
-
-    metrics = {
-        "total_time": total_time,
-        "tokenization_time": tokenization_time,
-        "generation_time": generation_time,
-        "total_input_tokens_unpadded": input_token_count,
-        "total_output_tokens": output_token_count,
-        "avg_total_time_per_card": total_time,
-        "avg_gen_time_per_card": generation_time,
-        "throughput_cards_per_second": 1 / total_time,
-        "throughput_tokens_per_second": tokens_per_second,
-    }
-
+    # Calculate additional derived metrics if needed, or pass through
+    # For now, we trust the provider's metrics + wrapping logic if we want total throughput
+    # But the provider already returns basic metrics. We can augment them here if we want 
+    # throughput relative to this function call, but the provider's timing is close enough.
+    
+    # Augment with throughput if time > 0
+    if metrics.get("generation_time", 0) > 0:
+        metrics["throughput_cards_per_second"] = 1 / metrics["generation_time"]
+    
     return content, metrics
 
 
@@ -126,7 +83,7 @@ def _setup_workspace(input_apkg: str, working_dir: str, console: Console) -> boo
     """Extracts the .apkg to the working directory."""
     if not os.path.exists(working_dir):
         os.makedirs(working_dir)
-        console.print(f"[bold green]Created working directory:[/bold green] {working_dir}")
+        # console.print(f"[bold green]Created working directory:[/bold green] {working_dir}") # optional noise
         console.print(f"Extracting [bold]{input_apkg}[/bold]...")
         with zipfile.ZipFile(input_apkg, "r") as zf:
             zf.extractall(working_dir)
@@ -302,6 +259,7 @@ def process_apkg_with_resume(
     preview: bool = False,
     limit: Optional[int] = None,
     exclude_fields: list[str] = None,
+    reprocess_all: bool = False,
 ):
     """
     Process an .apkg file using an LLM, with resume capability.
@@ -348,7 +306,7 @@ def process_apkg_with_resume(
     unprocessed_nids = []
     for nid in all_nids:
         note = col.get_note(nid)
-        if not note.has_tag(processed_tag):
+        if reprocess_all or not note.has_tag(processed_tag):
             unprocessed_nids.append(nid)
             
     notes_to_process_count = len(unprocessed_nids)

@@ -8,17 +8,25 @@ DeckTor is a command-line tool to improve your Anki decks using Google's Gemini 
 
 Note: This was almost entirely vibe-coded off the original repo.
 
+## Quick Start
+Don't want to install anything? Run DeckTor directly in your browser:
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/itsjafer/decktor-cli/blob/main/notebooks/quickstart.ipynb)
+
 ## Features
 
+- **Scheduling Preserved:** Preserves scheduling information of the cards by modifying them in-place.
 - **Gemini API Powered:** Uses Google's Gemini models (Flash, Flash Lite) for fast and effective card processing.
 - **Batch Processing:** Robust CLI for processing large decks with resume capability.
+- **GPT4Free Support:** Includes a "GPT4Free (Free)" option powered by `g4f`, allowing usage without an API key (only for testing, not recommended for large scale processing).
 - **Preview Mode:** Dry-run your changes before committing them to a new deck.
 - **Resumable:** If the process is interrupted, simply run the command again to pick up where you left off.
 
 ## Requirements
 
 - **Python 3.9+**
-- **Google Gemini API Key:** Required for using Gemini models.
+- **Google Gemini API Key:** Required for using Gemini models. Get yours [here](https://aistudio.google.com/api-keys). Cost estimate: Using the flash lite model, processing 5000 cards cost me about $0.40.
+    - **GPT4Free** is also supported for usage without an API key, but not recommended for large scale processing.
 
 ## Installation
 
@@ -65,6 +73,7 @@ decktor process input.apkg output.apkg
 
 - `--model`: Choose the model to use. Default: `Gemini 2.5 Flash Lite`.
     - Example: `--model "Gemini 2.5 Flash"`
+    - Example: `--model free` (Free mode)
 - `--batch-size`: Number of cards to process before saving progress. Default: `10`.
     - Example: `--batch-size 20`
 - `--preview`: Run in "dry run" mode. No changes are written to disk; changes are shown in the terminal.
@@ -75,6 +84,7 @@ decktor process input.apkg output.apkg
 - `--exclude-fields`: Comma-separated list of fields to **exclude** from the LLM context. These fields will be ignored by the LLM and preserved untouched in the output.
     - Example: `--exclude-fields "Audio,Image"`
 - `--working-dir`: Directory for intermediate files (default: `.decktor_work`). **Keep this directory to resume if interrupted.**
+- `--reprocess-all`: Reprocess all cards, ignoring the 'decktor-processed' tag. Useful if you want to force a re-run on an already processed deck.
 
 ### Example Workflow
 
