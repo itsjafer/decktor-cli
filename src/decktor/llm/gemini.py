@@ -1,6 +1,6 @@
 import os
 import time
-import google.generativeai as genai
+from google import genai
 from typing import Tuple, Dict, Any
 from .base import LLMProvider
 from decktor.models import SUPPORTED_MODELS
@@ -16,10 +16,10 @@ class GeminiProvider(LLMProvider):
         if not api_key:
             raise ValueError("GOOGLE_API_KEY not found in environment variables. Please set it in a .env file.")
         
-        genai.configure(api_key=api_key)
+        self.client = genai.Client(api_key=api_key)
         
         # Configure generation config
-        generation_config = {
+        self.generation_config = {
             "temperature": 0.7,
             "top_p": 0.95,
             "top_k": 40,
@@ -27,15 +27,15 @@ class GeminiProvider(LLMProvider):
             "response_mime_type": "application/json",
         }
         
-        self.model = genai.GenerativeModel(
-            model_name=self.model_id,
-            generation_config=generation_config,
-        )
 
     def generate(self, prompt: str) -> Tuple[str, Dict[str, Any]]:
         start_time = time.time()
         try:
-            response = self.model.generate_content(prompt)
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=prompt,
+                config=self.generation_config
+            )
             content = response.text
             
             input_tokens = 0

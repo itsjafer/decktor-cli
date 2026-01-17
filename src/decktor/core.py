@@ -228,8 +228,13 @@ def _display_preview(console: Console, nid: int, original_fields: Dict[str, str]
             table.add_row(key, str(original_val_clean), str(new_val))
     
     console.print(table)
-    if "reason" in item:
-        console.print(f"[italic]Reason: {item['reason']}[/italic]")
+    
+    reason = item.get('reason', '')
+    if not item.get("changed", False) and (not reason or reason.strip() == ""):
+        reason = "Unchanged"
+        
+    if reason:
+        console.print(f"[italic]Reason: {reason}[/italic]")
     console.print("\n")
 
 

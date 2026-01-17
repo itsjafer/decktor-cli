@@ -20,7 +20,7 @@ dependencies = [
     "zstandard",
     "rich",
     "beautifulsoup4",
-    "google-generativeai",
+    "google-genai",
     "python-dotenv",
     "click",
     "g4f",
