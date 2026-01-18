@@ -4,7 +4,7 @@
 
 # DeckTor (CLI)
 
-DeckTor is a command-line tool to improve your Anki decks using LLMs like Gemnini. ChatGPT, or Claude. It processes cards in batches to fix errors, improve clarity, or add content, giving you someehat granular control over your flashcards.
+DeckTor is a command-line tool to improve your Anki decks using LLMs like Gemini. ChatGPT, or Claude. It processes cards in batches to fix errors, improve clarity, or add content, giving you someehat granular control over your flashcards.
 
 Note: This was almost entirely vibe-coded off the original repo.
 
