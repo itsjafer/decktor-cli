@@ -4,7 +4,7 @@
 
 # DeckTor (CLI)
 
-DeckTor is a command-line tool to improve your Anki decks using Google's Gemini API. It processes cards individually to fix errors, improve clarity, or add content, giving you granular control over your flashcards.
+DeckTor is a command-line tool to improve your Anki decks using LLMs like Gemnini. ChatGPT, or Claude. It processes cards in batches to fix errors, improve clarity, or add content, giving you someehat granular control over your flashcards.
 
 Note: This was almost entirely vibe-coded off the original repo.
 
@@ -25,7 +25,7 @@ Don't want to install anything? Run DeckTor directly in your browser:
 ## Requirements
 
 - **Python 3.9+**
-- **Google Gemini API Key:** Required for using Gemini models. Get yours [here](https://aistudio.google.com/api-keys). Cost estimate: Using the flash lite model, processing 5000 cards cost me about $0.40.
+- **Gemini API Key:** Required for using Gemini models. Get yours [here](https://aistudio.google.com/api-keys). Cost estimate: Using the flash lite model, processing 5000 cards cost me about $0.40. You are welcome to use ChataGPT or Claude as well.
     - **GPT4Free** is also supported for usage without an API key, but not recommended for large scale processing.
 
 ## Installation
